@@ -1,20 +1,16 @@
 // src/screens/VisualsScreen.js
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useFocusEffect } from '@react-navigation/native';
+import { useCallback, useEffect, useState } from 'react';
 import {
-    collection,
-    onSnapshot,
-    query,
-    where,
-} from 'firebase/firestore';
-import { useEffect, useState } from 'react';
-import {
-    Dimensions,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
+  Dimensions,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { BarChart, PieChart } from 'react-native-chart-kit';
-import { auth, db } from '../config/firebase';
 import { colors, motivationalMessages } from '../utils/colors';
 
 const screenWidth = Dimensions.get('window').width;
@@ -23,39 +19,96 @@ export default function VisualsScreen() {
   const [totalSaving, setTotalSaving] = useState(0);
   const [totalSpending, setTotalSpending] = useState(0);
   const [motivation, setMotivation] = useState('');
+  const [selectedMonth, setSelectedMonth] = useState(new Date());
+  const [allExpenses, setAllExpenses] = useState([]);
 
   useEffect(() => {
-    if (!auth.currentUser) return;
-
-    const q = query(
-      collection(db, 'expenses'),
-      where('userId', '==', auth.currentUser.uid)
-    );
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      let savingSum = 0;
-      let spendingSum = 0;
-
-      snapshot.forEach((doc) => {
-        const data = doc.data();
-        if (data.type === 'saving') {
-          savingSum += data.amount;
-        } else {
-          spendingSum += data.amount;
-        }
-      });
-
-      setTotalSaving(savingSum);
-      setTotalSpending(spendingSum);
-    });
-
+    loadExpenseData();
+    
     // Set random motivational message
     const randomMessage =
       motivationalMessages[Math.floor(Math.random() * motivationalMessages.length)];
     setMotivation(randomMessage);
-
-    return () => unsubscribe();
   }, []);
+
+  // Filter expenses when selected month changes
+  useEffect(() => {
+    if (allExpenses.length > 0) {
+      filterExpensesByMonth(allExpenses, selectedMonth);
+    }
+  }, [selectedMonth, allExpenses]);
+
+  // Refresh data when screen comes into focus (when user switches to this tab)
+  useFocusEffect(
+    useCallback(() => {
+      loadExpenseData();
+    }, [])
+  );
+
+  const loadExpenseData = async () => {
+    try {
+      const user = await AsyncStorage.getItem('currentUser');
+      if (!user) return;
+
+      const expensesData = await AsyncStorage.getItem(`expenses_${user}`);
+      if (expensesData) {
+        const expenses = JSON.parse(expensesData);
+        setAllExpenses(expenses);
+        filterExpensesByMonth(expenses, selectedMonth);
+      } else {
+        // No expenses yet
+        setAllExpenses([]);
+        setTotalSaving(0);
+        setTotalSpending(0);
+      }
+    } catch (error) {
+      console.log('Error loading expense data:', error);
+    }
+  };
+
+  const filterExpensesByMonth = (expenses, month) => {
+    const filtered = expenses.filter(expense => {
+      const expenseDate = new Date(expense.date);
+      return expenseDate.getMonth() === month.getMonth() && 
+             expenseDate.getFullYear() === month.getFullYear();
+    });
+
+    let savingSum = 0;
+    let spendingSum = 0;
+
+    filtered.forEach((expense) => {
+      if (expense.type === 'saving') {
+        savingSum += expense.amount;
+      } else {
+        spendingSum += expense.amount;
+      }
+    });
+
+    setTotalSaving(savingSum);
+    setTotalSpending(spendingSum);
+  };
+
+  const getYearlyData = () => {
+    const year = selectedMonth.getFullYear();
+    const monthlyData = {
+      savings: new Array(12).fill(0),
+      spending: new Array(12).fill(0)
+    };
+
+    allExpenses.forEach(expense => {
+      const expenseDate = new Date(expense.date);
+      if (expenseDate.getFullYear() === year) {
+        const month = expenseDate.getMonth();
+        if (expense.type === 'saving') {
+          monthlyData.savings[month] += expense.amount;
+        } else {
+          monthlyData.spending[month] += expense.amount;
+        }
+      }
+    });
+
+    return monthlyData;
+  };
 
   const pieData = [
     {
@@ -74,11 +127,27 @@ export default function VisualsScreen() {
     },
   ];
 
+  const yearlyData = getYearlyData();
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  
+  // Create completely minimal spacing approach
+  const groupedLabels = [];
+  const groupedData = [];
+  const groupedColors = [];
+  
+  monthNames.forEach((month, index) => {
+    // Use empty strings and the month name only once per pair
+    groupedLabels.push(month, ''); // Month name for first bar, empty for second
+    groupedData.push(yearlyData.savings[index], yearlyData.spending[index]);
+    groupedColors.push(colors.saving, colors.spending);
+  });
+  
   const barData = {
-    labels: ['Savings', 'Spending'],
+    labels: groupedLabels,
     datasets: [
       {
-        data: [totalSaving, totalSpending],
+        data: groupedData,
+        colors: groupedColors.map(color => () => color),
       },
     ],
   };
@@ -90,6 +159,9 @@ export default function VisualsScreen() {
     strokeWidth: 2,
     barPercentage: 0.7,
     decimalPlaces: 2,
+    useShadowColorFromDataset: false,
+    fillShadowGradient: colors.primary,
+    fillShadowGradientOpacity: 1,
   };
 
   const total = totalSaving + totalSpending;
@@ -102,36 +174,51 @@ export default function VisualsScreen() {
         <Text style={styles.motivationText}>{motivation}</Text>
       </View>
 
+      <View style={styles.monthSelector}>
+        <Text style={styles.monthSelectorTitle}>📅 View Month:</Text>
+        <View style={styles.monthButtons}>
+          <TouchableOpacity 
+            style={styles.monthNavButton}
+            onPress={() => {
+              const prevMonth = new Date(selectedMonth);
+              prevMonth.setMonth(prevMonth.getMonth() - 1);
+              setSelectedMonth(prevMonth);
+            }}
+          >
+            <Text style={styles.monthNavButtonText}>←</Text>
+          </TouchableOpacity>
+          
+          <View style={styles.selectedMonthContainer}>
+            <Text style={styles.selectedMonthText}>
+              {selectedMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+            </Text>
+          </View>
+          
+          <TouchableOpacity 
+            style={styles.monthNavButton}
+            onPress={() => {
+              const nextMonth = new Date(selectedMonth);
+              nextMonth.setMonth(nextMonth.getMonth() + 1);
+              setSelectedMonth(nextMonth);
+            }}
+          >
+            <Text style={styles.monthNavButtonText}>→</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
       <View style={styles.summaryCards}>
         <View style={[styles.summaryCard, { backgroundColor: colors.saving }]}>
           <Text style={styles.summaryEmoji}>💰</Text>
-          <Text style={styles.summaryLabel}>Total Savings</Text>
+          <Text style={styles.summaryLabel}>Month Savings</Text>
           <Text style={styles.summaryAmount}>${totalSaving.toFixed(2)}</Text>
         </View>
 
         <View style={[styles.summaryCard, { backgroundColor: colors.spending }]}>
           <Text style={styles.summaryEmoji}>💸</Text>
-          <Text style={styles.summaryLabel}>Total Spending</Text>
+          <Text style={styles.summaryLabel}>Month Spending</Text>
           <Text style={styles.summaryAmount}>${totalSpending.toFixed(2)}</Text>
         </View>
-      </View>
-
-      <View style={styles.progressCard}>
-        <Text style={styles.progressTitle}>Savings Rate</Text>
-        <Text style={styles.progressPercentage}>{savingsPercentage}%</Text>
-        <View style={styles.progressBarContainer}>
-          <View
-            style={[
-              styles.progressBarFill,
-              { width: `${savingsPercentage}%` },
-            ]}
-          />
-        </View>
-        <Text style={styles.progressText}>
-          {savingsPercentage > 50
-            ? 'Amazing! You\'re saving more than spending! 🌟'
-            : 'Keep going! Try to save a bit more! 💪'}
-        </Text>
       </View>
 
       {total > 0 && (
@@ -151,16 +238,39 @@ export default function VisualsScreen() {
           </View>
 
           <View style={styles.chartCard}>
-            <Text style={styles.chartTitle}>Comparison Chart 📈</Text>
-            <BarChart
-              data={barData}
-              width={screenWidth - 60}
-              height={220}
-              chartConfig={chartConfig}
-              style={styles.barChart}
-              fromZero
-              showValuesOnTopOfBars
-            />
+            <Text style={styles.chartTitle}>
+              {selectedMonth.getFullYear()} Monthly Overview 📈
+            </Text>
+            <Text style={styles.chartSubtitle}>
+              Swipe right to see more months →
+            </Text>
+            <ScrollView 
+              horizontal={true} 
+              showsHorizontalScrollIndicator={true}
+              style={styles.chartScrollView}
+            >
+              <BarChart
+                data={barData}
+                width={screenWidth * 3.5}
+                height={260}
+                chartConfig={{
+                  ...chartConfig,
+                  barPercentage: 1.0,
+                  categoryPercentage: 0.98,
+                  decimalPlaces: 0,
+                  propsForLabels: {
+                    fontSize: 8,
+                  },
+                  paddingLeft: 0,
+                  paddingRight: 0,
+                }}
+                style={styles.barChart}
+                fromZero
+                showValuesOnTopOfBars={true}
+                showLegend={false}
+                withCustomBarColorFromData={true}
+              />
+            </ScrollView>
           </View>
         </>
       )}
@@ -174,6 +284,24 @@ export default function VisualsScreen() {
           </Text>
         </View>
       )}
+
+      <View style={styles.progressCard}>
+        <Text style={styles.progressTitle}>Savings Rate</Text>
+        <Text style={styles.progressPercentage}>{savingsPercentage}%</Text>
+        <View style={styles.progressBarContainer}>
+          <View
+            style={[
+              styles.progressBarFill,
+              { width: `${savingsPercentage}%` },
+            ]}
+          />
+        </View>
+        <Text style={styles.progressText}>
+          {savingsPercentage > 50
+            ? 'Amazing! You\'re saving more than spending! 🌟'
+            : 'Keep going! Try to save a bit more! 💪'}
+        </Text>
+      </View>
     </ScrollView>
   );
 }
@@ -204,6 +332,53 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: colors.text,
     textAlign: 'center',
+  },
+  monthSelector: {
+    backgroundColor: colors.white,
+    margin: 20,
+    marginTop: 0,
+    padding: 20,
+    borderRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  monthSelectorTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: colors.text,
+    marginBottom: 15,
+    textAlign: 'center',
+  },
+  monthButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  monthNavButton: {
+    backgroundColor: colors.primary,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  monthNavButtonText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: colors.white,
+  },
+  selectedMonthContainer: {
+    flex: 1,
+    alignItems: 'center',
+    marginHorizontal: 15,
+  },
+  selectedMonthText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: colors.text,
   },
   summaryCards: {
     flexDirection: 'row',
@@ -297,7 +472,17 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     color: colors.text,
+    marginBottom: 5,
+  },
+  chartSubtitle: {
+    fontSize: 14,
+    color: colors.textLight,
+    textAlign: 'center',
     marginBottom: 15,
+    fontStyle: 'italic',
+  },
+  chartScrollView: {
+    flexDirection: 'row',
   },
   barChart: {
     borderRadius: 16,

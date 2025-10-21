@@ -1,22 +1,23 @@
 // src/navigation/AppNavigator.js
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { onAuthStateChanged } from 'firebase/auth';
 import { useEffect, useState } from 'react';
-import { auth } from '../config/firebase';
 
 // Screens
 import ExpenseScreen from '../screens/ExpenseScreen';
-import LoginScreen from '../screens/LoginScreen';
-import RegisterScreen from '../screens/RegisterScreen';
+import LoginScreen from '../screens/LoginScreen-simple';
+import RegisterScreen from '../screens/RegisterScreen-simple';
 import SettingsScreen from '../screens/SettingsScreen';
 import VisualsScreen from '../screens/VisualsScreen';
 
 // Icons (using emoji for simplicity)
+import { Text } from 'react-native';
+
 const TabIcon = ({ emoji, focused }) => (
-  <span style={{ fontSize: focused ? 32 : 28, opacity: focused ? 1 : 0.6 }}>
+  <Text style={{ fontSize: focused ? 32 : 28, opacity: focused ? 1 : 0.6 }}>
     {emoji}
-  </span>
+  </Text>
 );
 
 const Stack = createNativeStackNavigator();
@@ -54,8 +55,8 @@ function MainTabs() {
         name="Expenses"
         component={ExpenseScreen}
         options={{
-          tabBarIcon: ({ focused }) => <TabIcon emoji="💰" focused={focused} />,
-          title: '💰 My Money',
+          tabBarIcon: ({ focused }) => <TabIcon emoji="🐷" focused={focused} />,
+          title: 'Piggy\'s Ledger',
         }}
       />
       <Tab.Screen
@@ -63,7 +64,7 @@ function MainTabs() {
         component={VisualsScreen}
         options={{
           tabBarIcon: ({ focused }) => <TabIcon emoji="📊" focused={focused} />,
-          title: '📊 My Progress',
+          title: 'My Progress',
         }}
       />
       <Tab.Screen
@@ -71,7 +72,7 @@ function MainTabs() {
         component={SettingsScreen}
         options={{
           tabBarIcon: ({ focused }) => <TabIcon emoji="⚙️" focused={focused} />,
-          title: '⚙️ Settings',
+          title: 'Settings',
         }}
       />
     </Tab.Navigator>
@@ -80,31 +81,36 @@ function MainTabs() {
 
 export default function AppNavigator() {
   const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(true);
 
+  // Check for logged in user on app start
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setUser(user);
-      setLoading(false);
-    });
-
-    return unsubscribe;
+    checkLoginStatus();
   }, []);
 
-  if (loading) {
+  const checkLoginStatus = async () => {
+    try {
+      const loggedInUser = await AsyncStorage.getItem('currentUser');
+      setUser(loggedInUser);
+    } catch (error) {
+      console.log('Error checking login status:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  if (isLoading) {
     return null; // Or a loading screen
   }
 
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
-      {user ? (
-        <Stack.Screen name="MainTabs" component={MainTabs} />
-      ) : (
-        <>
-          <Stack.Screen name="Login" component={LoginScreen} />
-          <Stack.Screen name="Register" component={RegisterScreen} />
-        </>
-      )}
+    <Stack.Navigator 
+      screenOptions={{ headerShown: false }}
+      initialRouteName={user ? "MainTabs" : "Login"}
+    >
+      <Stack.Screen name="Login" component={LoginScreen} />
+      <Stack.Screen name="Register" component={RegisterScreen} />
+      <Stack.Screen name="MainTabs" component={MainTabs} />
     </Stack.Navigator>
   );
 }

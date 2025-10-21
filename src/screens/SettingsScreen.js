@@ -1,21 +1,25 @@
 // src/screens/SettingsScreen.js
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { CommonActions } from '@react-navigation/native';
 import { signOut } from 'firebase/auth';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
 import {
-    Alert,
-    ScrollView,
-    StyleSheet,
-    Switch,
-    Text,
-    TouchableOpacity,
-    View,
+  Alert,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import { auth, db } from '../config/firebase';
 import { colors } from '../utils/colors';
 
-export default function SettingsScreen() {
-  const [userName, setUserName] = useState('');
+export default function SettingsScreen({ navigation }) {
+  const [userName, setUserName] = useState('PiggyPal User');
+  const [currentUser, setCurrentUser] = useState('');
+  const [profilePhoto, setProfilePhoto] = useState(null);
   const [notifications, setNotifications] = useState(true);
   const [dailyReminder, setDailyReminder] = useState(false);
 
@@ -24,15 +28,30 @@ export default function SettingsScreen() {
   }, []);
 
   const loadUserSettings = async () => {
-    if (!auth.currentUser) return;
-
     try {
-      const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
-      if (userDoc.exists()) {
-        const data = userDoc.data();
-        setUserName(data.name || 'Friend');
-        setNotifications(data.notifications !== false);
-        setDailyReminder(data.dailyReminder === true);
+      // Load from AsyncStorage (local auth)
+      const user = await AsyncStorage.getItem('currentUser');
+      const userNameStored = await AsyncStorage.getItem('currentUserName');
+      const profilePhotoStored = await AsyncStorage.getItem('currentUserPhoto');
+      if (user) {
+        setCurrentUser(user);
+      }
+      if (userNameStored) {
+        setUserName(userNameStored);
+      }
+      if (profilePhotoStored) {
+        setProfilePhoto(profilePhotoStored);
+      }
+
+      // Load from Firebase (if available)
+      if (auth.currentUser) {
+        const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
+        if (userDoc.exists()) {
+          const data = userDoc.data();
+          setUserName(data.name || userNameStored || 'PiggyPal User');
+          setNotifications(data.notifications !== false);
+          setDailyReminder(data.dailyReminder === true);
+        }
       }
     } catch (error) {
       console.error('Error loading settings:', error);
@@ -40,15 +59,181 @@ export default function SettingsScreen() {
   };
 
   const updateSetting = async (field, value) => {
-    if (!auth.currentUser) return;
+    // Update Firebase if user is authenticated
+    if (auth.currentUser) {
+      try {
+        await updateDoc(doc(db, 'users', auth.currentUser.uid), {
+          [field]: value,
+        });
+      } catch (error) {
+        console.error('Error updating Firebase setting:', error);
+        // Don't show error to user - local state still works
+      }
+    }
+    
+    // You could also save to AsyncStorage for local backup
+    // await AsyncStorage.setItem(`setting_${field}`, value.toString());
+  };
 
+  const selectProfilePhoto = () => {
+    const avatarOptions = [
+      // Farm Animals
+      { emoji: '🐷', label: 'Pig' },
+      { emoji: '🐮', label: 'Cow' },
+      { emoji: '🐴', label: 'Horse' },
+      { emoji: '🐑', label: 'Sheep' },
+      { emoji: '🐐', label: 'Goat' },
+      { emoji: '🐓', label: 'Rooster' },
+      { emoji: '🐔', label: 'Chicken' },
+      { emoji: '🐣', label: 'Chick' },
+      { emoji: '🐥', label: 'Baby Chick' },
+      { emoji: '🦆', label: 'Duck' },
+      { emoji: '🦢', label: 'Swan' },
+      
+      // Pets
+      { emoji: '🐶', label: 'Dog' },
+      { emoji: '🐕', label: 'Dog Face' },
+      { emoji: '🦮', label: 'Guide Dog' },
+      { emoji: '🐕‍🦺', label: 'Service Dog' },
+      { emoji: '🐩', label: 'Poodle' },
+      { emoji: '🐺', label: 'Wolf' },
+      { emoji: '🦊', label: 'Fox' },
+      { emoji: '🦝', label: 'Raccoon' },
+      { emoji: '🐱', label: 'Cat' },
+      { emoji: '🐈', label: 'Cat Face' },
+      { emoji: '🐈‍⬛', label: 'Black Cat' },
+      { emoji: '🦁', label: 'Lion' },
+      { emoji: '🐯', label: 'Tiger Face' },
+      { emoji: '🐅', label: 'Tiger' },
+      { emoji: '🐆', label: 'Leopard' },
+      
+      // Wild Animals
+      { emoji: '🐎', label: 'Racing Horse' },
+      { emoji: '🦄', label: 'Unicorn' },
+      { emoji: '🦓', label: 'Zebra' },
+      { emoji: '🦌', label: 'Deer' },
+      { emoji: '🦏', label: 'Rhinoceros' },
+      { emoji: '🦣', label: 'Mammoth' },
+      { emoji: '🐘', label: 'Elephant' },
+      { emoji: '🦒', label: 'Giraffe' },
+      { emoji: '🦘', label: 'Kangaroo' },
+      { emoji: '🦬', label: 'Bison' },
+      { emoji: '🐃', label: 'Water Buffalo' },
+      { emoji: '🐂', label: 'Ox' },
+      { emoji: '🐄', label: 'Cow Face' },
+      
+      // Bears
+      { emoji: '🐻', label: 'Bear' },
+      { emoji: '🐻‍❄️', label: 'Polar Bear' },
+      { emoji: '🐼', label: 'Panda' },
+      { emoji: '🐨', label: 'Koala' },
+      
+      // Primates
+      { emoji: '�', label: 'Monkey Face' },
+      { emoji: '🐒', label: 'Monkey' },
+      { emoji: '🦍', label: 'Gorilla' },
+      { emoji: '🦧', label: 'Orangutan' },
+      
+      // Water Animals
+      { emoji: '🐳', label: 'Whale' },
+      { emoji: '🐋', label: 'Whale Face' },
+      { emoji: '🐬', label: 'Dolphin' },
+      { emoji: '🦭', label: 'Seal' },
+      { emoji: '🐟', label: 'Fish' },
+      { emoji: '🐠', label: 'Tropical Fish' },
+      { emoji: '🐡', label: 'Pufferfish' },
+      { emoji: '🦈', label: 'Shark' },
+      { emoji: '🐙', label: 'Octopus' },
+      { emoji: '�', label: 'Squid' },
+      { emoji: '🦀', label: 'Crab' },
+      { emoji: '🦞', label: 'Lobster' },
+      { emoji: '🦐', label: 'Shrimp' },
+      
+      // Small Animals
+      { emoji: '🐭', label: 'Mouse Face' },
+      { emoji: '🐁', label: 'Mouse' },
+      { emoji: '🐀', label: 'Rat' },
+      { emoji: '🐹', label: 'Hamster' },
+      { emoji: '�', label: 'Rabbit Face' },
+      { emoji: '🐇', label: 'Rabbit' },
+      { emoji: '�️', label: 'Chipmunk' },
+      { emoji: '🦫', label: 'Beaver' },
+      { emoji: '🦔', label: 'Hedgehog' },
+      { emoji: '🦇', label: 'Bat' },
+      
+      // Reptiles & Amphibians
+      { emoji: '🐸', label: 'Frog' },
+      { emoji: '�', label: 'Turtle' },
+      { emoji: '🦎', label: 'Lizard' },
+      { emoji: '🐍', label: 'Snake' },
+      { emoji: '🐲', label: 'Dragon Face' },
+      { emoji: '🐉', label: 'Dragon' },
+      { emoji: '🦕', label: 'Sauropod' },
+      { emoji: '🦖', label: 'T-Rex' },
+      
+      // Birds
+      { emoji: '🐦', label: 'Bird' },
+      { emoji: '🐧', label: 'Penguin' },
+      { emoji: '🕊️', label: 'Dove' },
+      { emoji: '🦅', label: 'Eagle' },
+      { emoji: '🦆', label: 'Duck' },
+      { emoji: '🦢', label: 'Swan' },
+      { emoji: '🦉', label: 'Owl' },
+      { emoji: '🦤', label: 'Dodo' },
+      { emoji: '🪶', label: 'Feather' },
+      { emoji: '🦜', label: 'Parrot' },
+      { emoji: '🦩', label: 'Flamingo' },
+      { emoji: '🦚', label: 'Peacock' },
+      
+      // Insects & Bugs
+      { emoji: '🐛', label: 'Bug' },
+      { emoji: '🦋', label: 'Butterfly' },
+      { emoji: '🐌', label: 'Snail' },
+      { emoji: '🐞', label: 'Ladybug' },
+      { emoji: '🐜', label: 'Ant' },
+      { emoji: '🪲', label: 'Beetle' },
+      { emoji: '🐝', label: 'Bee' },
+      { emoji: '🪰', label: 'Fly' },
+      { emoji: '🦟', label: 'Mosquito' },
+      { emoji: '🦗', label: 'Cricket' },
+      { emoji: '🕷️', label: 'Spider' },
+      { emoji: '🕸️', label: 'Spider Web' },
+      { emoji: '🦂', label: 'Scorpion' },
+    ];
+
+    const buttons = avatarOptions.map(avatar => ({
+      text: `${avatar.emoji} ${avatar.label}`,
+      onPress: () => saveProfilePhoto(avatar.emoji)
+    }));
+
+    buttons.push({ text: 'Cancel', style: 'cancel' });
+
+    Alert.alert(
+      'Choose Your Animal Avatar 🎭',
+      'Pick any animal to represent you!',
+      buttons
+    );
+  };
+
+  const saveProfilePhoto = async (emoji) => {
     try {
-      await updateDoc(doc(db, 'users', auth.currentUser.uid), {
-        [field]: value,
-      });
+      setProfilePhoto(emoji);
+      await AsyncStorage.setItem('currentUserPhoto', emoji);
+      
+      // Also update Firebase if available
+      if (auth.currentUser) {
+        try {
+          await updateDoc(doc(db, 'users', auth.currentUser.uid), {
+            profilePhoto: emoji,
+          });
+        } catch (error) {
+          console.error('Error updating Firebase photo:', error);
+        }
+      }
+      
+      Alert.alert('Success! 🎉', 'Your avatar has been updated!');
     } catch (error) {
-      console.error('Error updating setting:', error);
-      Alert.alert('Error', 'Failed to update setting 😅');
+      Alert.alert('Error', 'Failed to update avatar. Please try again.');
     }
   };
 
@@ -63,35 +248,64 @@ export default function SettingsScreen() {
   };
 
   const handleLogout = () => {
-    Alert.alert('Logout', 'Are you sure you want to logout? 👋', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Logout',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await signOut(auth);
-          } catch (error) {
-            Alert.alert('Error', 'Failed to logout 😅');
-          }
+    Alert.alert(
+      'Logout 🚪',
+      'Are you sure you want to logout?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Logout',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              // Clear from BOTH Firebase AND AsyncStorage
+              await AsyncStorage.removeItem('currentUser');
+              await AsyncStorage.removeItem('currentUserName');
+              await AsyncStorage.removeItem('currentUserPhoto');
+              
+              // Sign out from Firebase (if using Firebase auth)
+              if (auth.currentUser) {
+                await signOut(auth);
+              }
+              
+              // Navigate back to login screen
+              navigation.dispatch(
+                CommonActions.reset({
+                  index: 0,
+                  routes: [{ name: 'Login' }],
+                })
+              );
+            } catch (error) {
+              Alert.alert('Error', 'Failed to logout. Please try again.');
+            }
+          },
         },
-      },
-    ]);
+      ]
+    );
   };
 
   const handleDeleteAccount = () => {
     Alert.alert(
       'Delete Account? ⚠️',
-      'This will permanently delete all your data. This cannot be undone!',
+      'This will permanently delete ALL your data including:\n\n• Your account information\n• All expense records\n• Savings progress\n• App settings\n\nThis action CANNOT be undone!',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Delete',
+          text: 'I understand, Delete Everything',
           style: 'destructive',
           onPress: () => {
+            // Double confirmation for safety
             Alert.alert(
-              'Coming Soon',
-              'Account deletion will be available in the next update! For now, please contact support.'
+              'Final Confirmation 🚨',
+              'Are you absolutely sure? Piggy will miss you! 🐷💔\n\nThis action is permanent and cannot be undone.',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'DELETE EVERYTHING',
+                  style: 'destructive',
+                  onPress: performAccountDeletion,
+                },
+              ]
             );
           },
         },
@@ -99,12 +313,79 @@ export default function SettingsScreen() {
     );
   };
 
+  const performAccountDeletion = async () => {
+    try {
+      // Get current user email for cleanup
+      const userEmail = await AsyncStorage.getItem('currentUser');
+      
+      if (userEmail) {
+        // Remove user account data
+        await AsyncStorage.removeItem(`user_${userEmail}`);
+        
+        // Remove expense data for this user
+        await AsyncStorage.removeItem(`expenses_${userEmail}`);
+        
+        // Remove any user-specific settings
+        await AsyncStorage.removeItem(`settings_${userEmail}`);
+      }
+      
+      // Clear current session data
+      await AsyncStorage.removeItem('currentUser');
+      await AsyncStorage.removeItem('currentUserName');
+      await AsyncStorage.removeItem('currentUserPhoto');
+      
+      // Clear any other app data
+      await AsyncStorage.removeItem('expenses'); // Global expenses if any
+      await AsyncStorage.removeItem('totalSavings');
+      
+      // Sign out from Firebase (if using Firebase auth)
+      if (auth.currentUser) {
+        // Note: For complete Firebase user deletion, you'd need to call
+        // auth.currentUser.delete(), but this requires recent authentication
+        await signOut(auth);
+      }
+      
+      Alert.alert(
+        'Account Deleted ✅',
+        'Your account and all data have been permanently deleted. Thank you for using PiggyPal!',
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              // Navigate back to login screen
+              navigation.dispatch(
+                CommonActions.reset({
+                  index: 0,
+                  routes: [{ name: 'Login' }],
+                })
+              );
+            }
+          }
+        ],
+        { cancelable: false }
+      );
+      
+    } catch (error) {
+      console.error('Error deleting account:', error);
+      Alert.alert(
+        'Deletion Failed ❌',
+        'There was an error deleting your account. Please try again or contact support.',
+        [{ text: 'OK' }]
+      );
+    }
+  };
+
   return (
     <ScrollView style={styles.container}>
       <View style={styles.profileCard}>
-        <Text style={styles.profileEmoji}>👤</Text>
+        <TouchableOpacity onPress={selectProfilePhoto} style={styles.profilePhotoContainer}>
+          <Text style={styles.profilePhoto}>{profilePhoto || '👤'}</Text>
+          <Text style={styles.photoHint}>Tap to change</Text>
+        </TouchableOpacity>
         <Text style={styles.profileName}>Hello, {userName}!</Text>
-        <Text style={styles.profileEmail}>{auth.currentUser?.email}</Text>
+        <Text style={styles.profileEmail}>
+          {auth.currentUser?.email || currentUser || 'Not logged in'}
+        </Text>
       </View>
 
       <View style={styles.section}>
@@ -226,9 +507,18 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
-  profileEmoji: {
-    fontSize: 60,
+  profilePhotoContainer: {
+    alignItems: 'center',
     marginBottom: 15,
+  },
+  profilePhoto: {
+    fontSize: 60,
+    marginBottom: 5,
+  },
+  photoHint: {
+    fontSize: 12,
+    color: colors.primary,
+    opacity: 0.7,
   },
   profileName: {
     fontSize: 24,

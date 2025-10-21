@@ -1,64 +1,145 @@
 // src/screens/ExpenseScreen.js
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import DateTimePicker from '@react-native-community/datetimepicker';
+import { useFocusEffect } from '@react-navigation/native';
+import { useCallback, useEffect, useState } from 'react';
 import {
-    addDoc,
-    collection,
-    deleteDoc,
-    doc,
-    onSnapshot,
-    query,
-    updateDoc,
-    where,
-} from 'firebase/firestore';
-import { useEffect, useState } from 'react';
-import {
-    Alert,
-    FlatList,
-    Modal,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  Alert,
+  Animated,
+  FlatList,
+  Keyboard,
+  Modal,
+  Platform,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  TouchableWithoutFeedback,
+  View,
 } from 'react-native';
-import { auth, db } from '../config/firebase';
+import ConfettiCannon from 'react-native-confetti-cannon';
 import { colors } from '../utils/colors';
+
+// Motivational messages for the header
+const motivationalMessages = [
+  "Your PiggyPal's waiting—how's the stash?",
+  "Snout's out! Time to see what you've saved!",
+  "PiggyPal says: every coin counts!",
+  "Your piggy's proud of your saving skills!",
+];
 
 export default function ExpenseScreen() {
   const [expenses, setExpenses] = useState([]);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingExpense, setEditingExpense] = useState(null);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [headerMessage, setHeaderMessage] = useState('');
   
   // Form fields
   const [title, setTitle] = useState('');
   const [amount, setAmount] = useState('');
   const [type, setType] = useState('spending'); // 'spending' or 'saving'
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  
+  // Confetti state
+  const [showConfetti, setShowConfetti] = useState(false);
+
+  // Animation values for FAB
+  const translateYValue = new Animated.Value(0);
+  const shadowOpacityValue = new Animated.Value(0.15);
+  const shadowHeightValue = new Animated.Value(12);
 
   useEffect(() => {
-    if (!auth.currentUser) return;
-
-    const q = query(
-      collection(db, 'expenses'),
-      where('userId', '==', auth.currentUser.uid)
-    );
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const expensesList = [];
-      snapshot.forEach((doc) => {
-        expensesList.push({ id: doc.id, ...doc.data() });
-      });
-      // Sort by date, newest first
-      expensesList.sort((a, b) => new Date(b.date) - new Date(a.date));
-      setExpenses(expensesList);
-    });
-
-    return () => unsubscribe();
+    loadCurrentUser();
+    loadExpenses();
+    
+    // Set initial random motivational message
+    const randomMessage = motivationalMessages[Math.floor(Math.random() * motivationalMessages.length)];
+    setHeaderMessage(randomMessage);
   }, []);
+
+  // Change message each time screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      const randomMessage = motivationalMessages[Math.floor(Math.random() * motivationalMessages.length)];
+      setHeaderMessage(randomMessage);
+    }, [])
+  );
+
+  const loadCurrentUser = async () => {
+    try {
+      const user = await AsyncStorage.getItem('currentUser');
+      setCurrentUser(user);
+    } catch (error) {
+      console.log('Error loading user:', error);
+    }
+  };
+
+  const loadExpenses = async () => {
+    try {
+      const user = await AsyncStorage.getItem('currentUser');
+      if (user) {
+        const expensesData = await AsyncStorage.getItem(`expenses_${user}`);
+        if (expensesData) {
+          const expensesList = JSON.parse(expensesData);
+          // Sort by date, newest first
+          expensesList.sort((a, b) => new Date(b.date) - new Date(a.date));
+          setExpenses(expensesList);
+        }
+      }
+    } catch (error) {
+      console.log('Error loading expenses:', error);
+    }
+  };
+
+  // Animation functions with dynamic shadows
+  const animatePressIn = () => {
+    Animated.parallel([
+      Animated.timing(translateYValue, {
+        toValue: -6, // Move down
+        duration: 100,
+        useNativeDriver: true,
+      }),
+      Animated.timing(shadowOpacityValue, {
+        toValue: 0.2, // Stronger shadow when pressed
+        duration: 100,
+        useNativeDriver: false,
+      }),
+      Animated.timing(shadowHeightValue, {
+        toValue: 4, // Smaller shadow when pressed (like CSS active state)
+        duration: 100,
+        useNativeDriver: false,
+      }),
+    ]).start();
+  };
+
+  const animatePressOut = () => {
+    Animated.parallel([
+      Animated.timing(translateYValue, {
+        toValue: 0,
+        duration: 150,
+        useNativeDriver: true,
+      }),
+      Animated.timing(shadowOpacityValue, {
+        toValue: 0.15, // Return to normal shadow
+        duration: 150,
+        useNativeDriver: false,
+      }),
+      Animated.timing(shadowHeightValue, {
+        toValue: 12, // Return to normal shadow height
+        duration: 150,
+        useNativeDriver: false,
+      }),
+    ]).start();
+  };
 
   const openAddModal = () => {
     setEditingExpense(null);
     setTitle('');
     setAmount('');
     setType('spending');
+    setSelectedDate(new Date());
     setModalVisible(true);
   };
 
@@ -67,6 +148,7 @@ export default function ExpenseScreen() {
     setTitle(expense.title);
     setAmount(expense.amount.toString());
     setType(expense.type);
+    setSelectedDate(expense.date ? new Date(expense.date) : new Date());
     setModalVisible(true);
   };
 
@@ -83,26 +165,60 @@ export default function ExpenseScreen() {
     }
 
     try {
+      const user = await AsyncStorage.getItem('currentUser');
+      if (!user) {
+        Alert.alert('Error', 'User not found');
+        return;
+      }
+
+      let updatedExpenses = [...expenses];
+
       if (editingExpense) {
         // Update existing expense
-        await updateDoc(doc(db, 'expenses', editingExpense.id), {
-          title,
-          amount: numAmount,
-          type,
-        });
-        Alert.alert('Success! 🎉', 'Updated successfully!');
+        const index = updatedExpenses.findIndex(exp => exp.id === editingExpense.id);
+        if (index !== -1) {
+          updatedExpenses[index] = {
+            ...updatedExpenses[index],
+            title,
+            amount: numAmount,
+            type,
+            date: selectedDate.toISOString(),
+          };
+        }
+        // Silent update - no popup
       } else {
         // Add new expense
-        await addDoc(collection(db, 'expenses'), {
-          userId: auth.currentUser.uid,
+        const newExpense = {
+          id: Date.now().toString(), // Simple ID generation
+          userId: user,
           title,
           amount: numAmount,
           type,
-          date: new Date().toISOString(),
-        });
-        Alert.alert('Success! 🎉', `${type === 'saving' ? 'Saving' : 'Spending'} added!`);
+          date: selectedDate.toISOString(),
+        };
+        updatedExpenses.unshift(newExpense); // Add to beginning for newest first
+        
+        // Trigger confetti for savings immediately!
+        if (type === 'saving') {
+          setShowConfetti(true);
+          // Auto-hide confetti after 4 seconds
+          setTimeout(() => setShowConfetti(false), 4000);
+        }
+        
+        // No alert popup - just confetti for savings or silent success for spending
       }
+
+      // Save to AsyncStorage
+      await AsyncStorage.setItem(`expenses_${user}`, JSON.stringify(updatedExpenses));
+      setExpenses(updatedExpenses);
       setModalVisible(false);
+      
+      // Clear form
+      setTitle('');
+      setAmount('');
+      setType('spending');
+      setEditingExpense(null);
+      
     } catch (error) {
       Alert.alert('Error', 'Something went wrong! 😅');
       console.error(error);
@@ -120,8 +236,16 @@ export default function ExpenseScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              await deleteDoc(doc(db, 'expenses', expense.id));
-              Alert.alert('Deleted! ✅', 'Item removed successfully!');
+              const user = await AsyncStorage.getItem('currentUser');
+              if (!user) {
+                Alert.alert('Error', 'User not found');
+                return;
+              }
+
+              const updatedExpenses = expenses.filter(exp => exp.id !== expense.id);
+              await AsyncStorage.setItem(`expenses_${user}`, JSON.stringify(updatedExpenses));
+              setExpenses(updatedExpenses);
+              // Silent delete - no popup
             } catch (error) {
               Alert.alert('Error', 'Failed to delete! 😅');
             }
@@ -154,24 +278,21 @@ export default function ExpenseScreen() {
           >
             ${item.amount.toFixed(2)}
           </Text>
-          <Text style={styles.expenseType}>
-            {item.type === 'saving' ? '💰 Saving' : '💸 Spending'}
-          </Text>
+          <View style={styles.expenseActions}>
+            <TouchableOpacity
+              style={styles.iconButton}
+              onPress={() => openEditModal(item)}
+            >
+              <Text style={styles.editIcon}>✏️</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.iconButton}
+              onPress={() => handleDelete(item)}
+            >
+              <Text style={styles.deleteIcon}>🗑️</Text>
+            </TouchableOpacity>
+          </View>
         </View>
-      </View>
-      <View style={styles.expenseActions}>
-        <TouchableOpacity
-          style={styles.editButton}
-          onPress={() => openEditModal(item)}
-        >
-          <Text style={styles.actionButtonText}>✏️ Edit</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.deleteButton}
-          onPress={() => handleDelete(item)}
-        >
-          <Text style={styles.actionButtonText}>🗑️ Delete</Text>
-        </TouchableOpacity>
       </View>
     </View>
   );
@@ -179,25 +300,51 @@ export default function ExpenseScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>My Money Tracker 💰</Text>
-        <TouchableOpacity style={styles.addButton} onPress={openAddModal}>
-          <Text style={styles.addButtonText}>+ Add New</Text>
-        </TouchableOpacity>
+        <Text style={styles.headerTitle}>{headerMessage}</Text>
       </View>
 
       {expenses.length === 0 ? (
         <View style={styles.emptyState}>
           <Text style={styles.emptyEmoji}>🐷</Text>
           <Text style={styles.emptyText}>No entries yet!</Text>
-          <Text style={styles.emptySubtext}>Tap "+ Add New" to get started</Text>
+          
+          {/* Arrow pointing to FAB */}
+          <View style={styles.arrowContainer}>
+            <Text style={styles.arrowText}>Tap here to get started!</Text>
+            <Text style={styles.arrow}>↘️</Text>
+          </View>
         </View>
       ) : (
-        <FlatList
-          data={expenses}
-          renderItem={renderExpenseItem}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.listContainer}
-        />
+        <View style={styles.splitContainer}>
+          {/* Savings Section */}
+          <View style={styles.savingsSection}>
+
+            <FlatList
+              data={expenses.filter(expense => expense.type === 'saving')}
+              renderItem={renderExpenseItem}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={[styles.sectionList, { flexGrow: 1 }]}
+              showsVerticalScrollIndicator={false}
+              nestedScrollEnabled={true}
+            />
+          </View>
+          
+          {/* Pink Divider Line */}
+          <View style={styles.dividerLine} />
+          
+          {/* Spendings Section */}
+          <View style={styles.spendingsSection}>
+
+            <FlatList
+              data={expenses.filter(expense => expense.type === 'spending')}
+              renderItem={renderExpenseItem}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={[styles.sectionList, { flexGrow: 1 }]}
+              showsVerticalScrollIndicator={false}
+              nestedScrollEnabled={true}
+            />
+          </View>
+        </View>
       )}
 
       {/* Add/Edit Modal */}
@@ -207,8 +354,10 @@ export default function ExpenseScreen() {
         visible={modalVisible}
         onRequestClose={() => setModalVisible(false)}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+          <View style={styles.modalOverlay}>
+            <TouchableWithoutFeedback onPress={() => {}}>
+              <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>
               {editingExpense ? '✏️ Edit Entry' : '➕ Add New Entry'}
             </Text>
@@ -229,6 +378,30 @@ export default function ExpenseScreen() {
               keyboardType="decimal-pad"
               placeholderTextColor={colors.textLight}
             />
+
+            <Text style={styles.typeLabel}>Date:</Text>
+            <TouchableOpacity 
+              style={styles.dateButton}
+              onPress={() => setShowDatePicker(true)}
+            >
+              <Text style={styles.dateButtonText}>
+                📅 {selectedDate.toLocaleDateString()}
+              </Text>
+            </TouchableOpacity>
+
+            {showDatePicker && (
+              <DateTimePicker
+                value={selectedDate}
+                mode="date"
+                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                onChange={(event, date) => {
+                  setShowDatePicker(Platform.OS === 'ios');
+                  if (date) {
+                    setSelectedDate(date);
+                  }
+                }}
+              />
+            )}
 
             <Text style={styles.typeLabel}>Type:</Text>
             <View style={styles.typeButtons}>
@@ -283,9 +456,70 @@ export default function ExpenseScreen() {
                 </Text>
               </TouchableOpacity>
             </View>
+              </View>
+            </TouchableWithoutFeedback>
           </View>
-        </View>
+        </TouchableWithoutFeedback>
       </Modal>
+
+      {/* Floating Action Button with Custom Shadow Layers */}
+      <View style={styles.fabShadowContainer}>
+        {/* Bottom shadow layer - mimics the CSS solid shadow */}
+        <Animated.View
+          style={[
+            styles.fabBottomShadow,
+            {
+              transform: [{ translateY: translateYValue }],
+            },
+          ]}
+        />
+        
+        {/* Main button with animated blur shadow */}
+        <Animated.View
+          style={[
+            styles.fab,
+            {
+              transform: [{ translateY: translateYValue }],
+              shadowOpacity: shadowOpacityValue,
+              shadowOffset: {
+                width: 0,
+                height: shadowHeightValue,
+              },
+            },
+          ]}
+        >
+          <TouchableOpacity
+            style={styles.fabTouchable}
+            onPress={openAddModal}
+            onPressIn={animatePressIn}
+            onPressOut={animatePressOut}
+            activeOpacity={1}
+          >
+            <Text style={styles.fabText}>+</Text>
+          </TouchableOpacity>
+        </Animated.View>
+      </View>
+
+      {/* Confetti Effect */}
+      {showConfetti && (
+        <ConfettiCannon
+          count={100}
+          origin={{x: 0, y: 0}}
+          autoStart={true}
+          fadeOut={true}
+          explosionSpeed={350}
+          fallSpeed={2000}
+          colors={['#FF6B9D', '#FFD700', '#FF69B4', '#FFA500', '#32CD32']}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            zIndex: 1000,
+          }}
+        />
+      )}
     </View>
   );
 }
@@ -296,31 +530,59 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
     padding: 20,
     paddingTop: 10,
+    alignItems: 'center',
   },
   headerTitle: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: 'bold',
     color: colors.text,
-  },
-  addButton: {
-    backgroundColor: colors.primary,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 20,
-  },
-  addButtonText: {
-    color: colors.white,
-    fontWeight: 'bold',
-    fontSize: 16,
+    textAlign: 'center',
   },
   listContainer: {
     padding: 20,
     paddingTop: 0,
+  },
+  splitContainer: {
+    flex: 1,
+    flexDirection: 'column',
+  },
+  section: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  savingsSection: {
+    flex: 0.5, // 50% of the space for savings
+    backgroundColor: colors.background,
+  },
+  spendingsSection: {
+    flex: 0.5, // 50% of the space for spendings
+    backgroundColor: colors.background,
+  },
+  dividerLine: {
+    height: 2,
+    backgroundColor: colors.primary, // Pink color
+    marginHorizontal: 20,
+    marginVertical: 5,
+  },
+  sectionHeader: {
+    backgroundColor: colors.white,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.textLight + '20',
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: colors.text,
+    textAlign: 'center',
+  },
+  sectionList: {
+    padding: 20,
+    paddingTop: 10,
+    paddingBottom: 10, // Minimal bottom padding - let content scroll to tab bar
   },
   expenseCard: {
     backgroundColor: colors.white,
@@ -354,11 +616,12 @@ const styles = StyleSheet.create({
   },
   expenseRight: {
     alignItems: 'flex-end',
+    justifyContent: 'center',
   },
   expenseAmount: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: 'bold',
-    marginBottom: 5,
+    marginBottom: 2,
   },
   expenseType: {
     fontSize: 12,
@@ -367,24 +630,22 @@ const styles = StyleSheet.create({
   expenseActions: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
-    gap: 10,
+    gap: 8,
+    marginTop: 5,
   },
-  editButton: {
-    backgroundColor: colors.secondary,
-    paddingHorizontal: 15,
-    paddingVertical: 8,
-    borderRadius: 10,
+  iconButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginHorizontal: 4,
   },
-  deleteButton: {
-    backgroundColor: colors.danger,
-    paddingHorizontal: 15,
-    paddingVertical: 8,
-    borderRadius: 10,
+  editIcon: {
+    fontSize: 18,
   },
-  actionButtonText: {
-    color: colors.white,
-    fontWeight: 'bold',
-    fontSize: 12,
+  deleteIcon: {
+    fontSize: 18,
   },
   emptyState: {
     flex: 1,
@@ -406,6 +667,23 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: colors.textLight,
     textAlign: 'center',
+  },
+  arrowContainer: {
+    position: 'absolute',
+    bottom: 70, // Move closer to the FAB (was 100)
+    right: 60,  // Move closer to the FAB (was 80)
+    alignItems: 'center',
+  },
+  arrowText: {
+    fontSize: 14,
+    color: colors.primary,
+    fontWeight: 'bold',
+    marginBottom: 5,
+    textAlign: 'center',
+  },
+  arrow: {
+    fontSize: 24,
+    transform: [{ rotate: '5deg' }], // Much more horizontal, pointing directly at the + icon
   },
   modalOverlay: {
     flex: 1,
@@ -435,6 +713,19 @@ const styles = StyleSheet.create({
     marginBottom: 15,
     borderWidth: 2,
     borderColor: colors.primary,
+  },
+  dateButton: {
+    backgroundColor: colors.background,
+    borderRadius: 12,
+    padding: 15,
+    marginBottom: 15,
+    borderWidth: 2,
+    borderColor: colors.primary,
+    alignItems: 'center',
+  },
+  dateButtonText: {
+    fontSize: 16,
+    color: colors.text,
   },
   typeLabel: {
     fontSize: 16,
@@ -493,5 +784,54 @@ const styles = StyleSheet.create({
     color: colors.white,
     fontWeight: 'bold',
     fontSize: 16,
+  },
+  fabShadowContainer: {
+    position: 'absolute',
+    bottom: 30,
+    right: 15,
+    width: 64,
+    height: 64,
+  },
+  fabBottomShadow: {
+    position: 'absolute',
+    bottom: -8, // Offset by 8px down (like CSS 0_8px_0_0)
+    left: 0,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: 'rgba(0,0,0,0.2)', // Solid shadow color from CSS
+    zIndex: 1,
+  },
+  fab: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#EC4899', // bg-pink-500
+    zIndex: 2,
+    // Blur shadow - mimics 0_12px_24px_rgba(0,0,0,0.15)
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 12,
+    },
+    shadowOpacity: 0.15,
+    shadowRadius: 24,
+    elevation: 12,
+  },
+  fabTouchable: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 32,
+  },
+  fabText: {
+    color: 'white',
+    fontSize: 32, // Larger + to match Plus size={32}
+    fontWeight: 'bold',
+    lineHeight: 32,
   },
 });
