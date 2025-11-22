@@ -2,19 +2,26 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CommonActions } from '@react-navigation/native';
 import { signOut } from 'firebase/auth';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
 import {
-  Alert,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  TouchableOpacity,
-  View
+    Alert,
+    FlatList,
+    Modal,
+    ScrollView,
+    StyleSheet,
+    Switch,
+    Text,
+    TouchableOpacity,
+    TouchableWithoutFeedback,
+    View
 } from 'react-native';
+import SyncStatusIndicator from '../components/SyncStatusIndicator';
+import TimePickerModal from '../components/TimePickerModal';
 import { auth, db } from '../config/firebase';
 import { colors } from '../utils/colors';
+import notificationService from '../utils/notificationService';
+import syncService from '../utils/syncService';
 
 export default function SettingsScreen({ navigation }) {
   const [userName, setUserName] = useState('PiggyPal User');
@@ -22,13 +29,45 @@ export default function SettingsScreen({ navigation }) {
   const [profilePhoto, setProfilePhoto] = useState(null);
   const [notifications, setNotifications] = useState(true);
   const [dailyReminder, setDailyReminder] = useState(false);
+  const [reminderTime, setReminderTime] = useState('19:00');
+  const [showAvatarModal, setShowAvatarModal] = useState(false);
+  const [showTimePickerModal, setShowTimePickerModal] = useState(false);
 
   useEffect(() => {
     loadUserSettings();
+    
+    // Add sync listener for when app comes back online
+    const unsubscribe = syncService.addListener((event) => {
+      if (event.type === 'network_change' && event.isOnline) {
+        // When back online, try to sync settings from server
+        syncService.syncSettingsFromServer().then((result) => {
+          if (result.success && result.data) {
+            // Reload local settings if server data was synced
+            loadUserSettings();
+          }
+        });
+      }
+      
+      if (event.type === 'settings_synced') {
+        // Settings were updated from server, reload them
+        loadUserSettings();
+      }
+    });
+    
+    return unsubscribe;
   }, []);
 
   const loadUserSettings = async () => {
     try {
+      // Initialize notification service
+      await notificationService.initialize();
+      
+      // Load notification settings
+      const notificationSettings = await notificationService.getNotificationSettings();
+      setNotifications(notificationSettings.enabled);
+      setDailyReminder(notificationSettings.dailyReminder);
+      setReminderTime(notificationSettings.reminderTime);
+      
       // Load from AsyncStorage (local auth)
       const user = await AsyncStorage.getItem('currentUser');
       const userNameStored = await AsyncStorage.getItem('currentUserName');
@@ -49,8 +88,7 @@ export default function SettingsScreen({ navigation }) {
         if (userDoc.exists()) {
           const data = userDoc.data();
           setUserName(data.name || userNameStored || 'PiggyPal User');
-          setNotifications(data.notifications !== false);
-          setDailyReminder(data.dailyReminder === true);
+          // Use notification service settings instead of Firebase for notifications
         }
       }
     } catch (error) {
@@ -59,192 +97,241 @@ export default function SettingsScreen({ navigation }) {
   };
 
   const updateSetting = async (field, value) => {
-    // Update Firebase if user is authenticated
-    if (auth.currentUser) {
-      try {
-        await updateDoc(doc(db, 'users', auth.currentUser.uid), {
-          [field]: value,
-        });
-      } catch (error) {
-        console.error('Error updating Firebase setting:', error);
-        // Don't show error to user - local state still works
+    try {
+      const result = await syncService.saveUserSetting(field, value);
+      
+      if (!result.success) {
+        Alert.alert('Settings Error', `Failed to save ${field}: ${result.error}`);
       }
+    } catch (error) {
+      console.error('Error updating setting:', error);
+      Alert.alert('Settings Error', 'Failed to save setting. Please try again.');
     }
-    
-    // You could also save to AsyncStorage for local backup
-    // await AsyncStorage.setItem(`setting_${field}`, value.toString());
   };
 
   const selectProfilePhoto = () => {
-    const avatarOptions = [
-      // Farm Animals
-      { emoji: '🐷', label: 'Pig' },
-      { emoji: '🐮', label: 'Cow' },
-      { emoji: '🐴', label: 'Horse' },
-      { emoji: '🐑', label: 'Sheep' },
-      { emoji: '🐐', label: 'Goat' },
-      { emoji: '🐓', label: 'Rooster' },
-      { emoji: '🐔', label: 'Chicken' },
-      { emoji: '🐣', label: 'Chick' },
-      { emoji: '🐥', label: 'Baby Chick' },
-      { emoji: '🦆', label: 'Duck' },
-      { emoji: '🦢', label: 'Swan' },
-      
-      // Pets
-      { emoji: '🐶', label: 'Dog' },
-      { emoji: '🐕', label: 'Dog Face' },
-      { emoji: '🦮', label: 'Guide Dog' },
-      { emoji: '🐕‍🦺', label: 'Service Dog' },
-      { emoji: '🐩', label: 'Poodle' },
-      { emoji: '🐺', label: 'Wolf' },
-      { emoji: '🦊', label: 'Fox' },
-      { emoji: '🦝', label: 'Raccoon' },
-      { emoji: '🐱', label: 'Cat' },
-      { emoji: '🐈', label: 'Cat Face' },
-      { emoji: '🐈‍⬛', label: 'Black Cat' },
-      { emoji: '🦁', label: 'Lion' },
-      { emoji: '🐯', label: 'Tiger Face' },
-      { emoji: '🐅', label: 'Tiger' },
-      { emoji: '🐆', label: 'Leopard' },
-      
-      // Wild Animals
-      { emoji: '🐎', label: 'Racing Horse' },
-      { emoji: '🦄', label: 'Unicorn' },
-      { emoji: '🦓', label: 'Zebra' },
-      { emoji: '🦌', label: 'Deer' },
-      { emoji: '🦏', label: 'Rhinoceros' },
-      { emoji: '🦣', label: 'Mammoth' },
-      { emoji: '🐘', label: 'Elephant' },
-      { emoji: '🦒', label: 'Giraffe' },
-      { emoji: '🦘', label: 'Kangaroo' },
-      { emoji: '🦬', label: 'Bison' },
-      { emoji: '🐃', label: 'Water Buffalo' },
-      { emoji: '🐂', label: 'Ox' },
-      { emoji: '🐄', label: 'Cow Face' },
-      
-      // Bears
-      { emoji: '🐻', label: 'Bear' },
-      { emoji: '🐻‍❄️', label: 'Polar Bear' },
-      { emoji: '🐼', label: 'Panda' },
-      { emoji: '🐨', label: 'Koala' },
-      
-      // Primates
-      { emoji: '�', label: 'Monkey Face' },
-      { emoji: '🐒', label: 'Monkey' },
-      { emoji: '🦍', label: 'Gorilla' },
-      { emoji: '🦧', label: 'Orangutan' },
-      
-      // Water Animals
-      { emoji: '🐳', label: 'Whale' },
-      { emoji: '🐋', label: 'Whale Face' },
-      { emoji: '🐬', label: 'Dolphin' },
-      { emoji: '🦭', label: 'Seal' },
-      { emoji: '🐟', label: 'Fish' },
-      { emoji: '🐠', label: 'Tropical Fish' },
-      { emoji: '🐡', label: 'Pufferfish' },
-      { emoji: '🦈', label: 'Shark' },
-      { emoji: '🐙', label: 'Octopus' },
-      { emoji: '�', label: 'Squid' },
-      { emoji: '🦀', label: 'Crab' },
-      { emoji: '🦞', label: 'Lobster' },
-      { emoji: '🦐', label: 'Shrimp' },
-      
-      // Small Animals
-      { emoji: '🐭', label: 'Mouse Face' },
-      { emoji: '🐁', label: 'Mouse' },
-      { emoji: '🐀', label: 'Rat' },
-      { emoji: '🐹', label: 'Hamster' },
-      { emoji: '�', label: 'Rabbit Face' },
-      { emoji: '🐇', label: 'Rabbit' },
-      { emoji: '�️', label: 'Chipmunk' },
-      { emoji: '🦫', label: 'Beaver' },
-      { emoji: '🦔', label: 'Hedgehog' },
-      { emoji: '🦇', label: 'Bat' },
-      
-      // Reptiles & Amphibians
-      { emoji: '🐸', label: 'Frog' },
-      { emoji: '�', label: 'Turtle' },
-      { emoji: '🦎', label: 'Lizard' },
-      { emoji: '🐍', label: 'Snake' },
-      { emoji: '🐲', label: 'Dragon Face' },
-      { emoji: '🐉', label: 'Dragon' },
-      { emoji: '🦕', label: 'Sauropod' },
-      { emoji: '🦖', label: 'T-Rex' },
-      
-      // Birds
-      { emoji: '🐦', label: 'Bird' },
-      { emoji: '🐧', label: 'Penguin' },
-      { emoji: '🕊️', label: 'Dove' },
-      { emoji: '🦅', label: 'Eagle' },
-      { emoji: '🦆', label: 'Duck' },
-      { emoji: '🦢', label: 'Swan' },
-      { emoji: '🦉', label: 'Owl' },
-      { emoji: '🦤', label: 'Dodo' },
-      { emoji: '🪶', label: 'Feather' },
-      { emoji: '🦜', label: 'Parrot' },
-      { emoji: '🦩', label: 'Flamingo' },
-      { emoji: '🦚', label: 'Peacock' },
-      
-      // Insects & Bugs
-      { emoji: '🐛', label: 'Bug' },
-      { emoji: '🦋', label: 'Butterfly' },
-      { emoji: '🐌', label: 'Snail' },
-      { emoji: '🐞', label: 'Ladybug' },
-      { emoji: '🐜', label: 'Ant' },
-      { emoji: '🪲', label: 'Beetle' },
-      { emoji: '🐝', label: 'Bee' },
-      { emoji: '🪰', label: 'Fly' },
-      { emoji: '🦟', label: 'Mosquito' },
-      { emoji: '🦗', label: 'Cricket' },
-      { emoji: '🕷️', label: 'Spider' },
-      { emoji: '🕸️', label: 'Spider Web' },
-      { emoji: '🦂', label: 'Scorpion' },
-    ];
-
-    const buttons = avatarOptions.map(avatar => ({
-      text: `${avatar.emoji} ${avatar.label}`,
-      onPress: () => saveProfilePhoto(avatar.emoji)
-    }));
-
-    buttons.push({ text: 'Cancel', style: 'cancel' });
-
-    Alert.alert(
-      'Choose Your Animal Avatar 🎭',
-      'Pick any animal to represent you!',
-      buttons
-    );
+    setShowAvatarModal(true);
   };
+
+  // Avatar options data
+  const avatarOptions = [
+    // Farm Animals
+    { emoji: '🐷', label: 'Pig' },
+    { emoji: '🐮', label: 'Cow' },
+    { emoji: '🐴', label: 'Horse' },
+    { emoji: '🐑', label: 'Sheep' },
+    { emoji: '🐐', label: 'Goat' },
+    { emoji: '🐓', label: 'Rooster' },
+    { emoji: '🐔', label: 'Chicken' },
+    { emoji: '🐣', label: 'Chick' },
+    { emoji: '🐥', label: 'Baby Chick' },
+    { emoji: '🦆', label: 'Duck' },
+    { emoji: '🦢', label: 'Swan' },
+    
+    // Pets
+    { emoji: '🐶', label: 'Dog' },
+    { emoji: '🐕', label: 'Dog Face' },
+    { emoji: '🦮', label: 'Guide Dog' },
+    { emoji: '🐕‍🦺', label: 'Service Dog' },
+    { emoji: '🐩', label: 'Poodle' },
+    { emoji: '🐺', label: 'Wolf' },
+    { emoji: '🦊', label: 'Fox' },
+    { emoji: '🦝', label: 'Raccoon' },
+    { emoji: '🐱', label: 'Cat' },
+    { emoji: '🐈', label: 'Cat Face' },
+    { emoji: '🐈‍⬛', label: 'Black Cat' },
+    { emoji: '🦁', label: 'Lion' },
+    { emoji: '🐯', label: 'Tiger Face' },
+    { emoji: '🐅', label: 'Tiger' },
+    { emoji: '🐆', label: 'Leopard' },
+    
+    // Wild Animals
+    { emoji: '🐎', label: 'Racing Horse' },
+    { emoji: '🦄', label: 'Unicorn' },
+    { emoji: '🦓', label: 'Zebra' },
+    { emoji: '🦌', label: 'Deer' },
+    { emoji: '🦏', label: 'Rhinoceros' },
+    { emoji: '🦣', label: 'Mammoth' },
+    { emoji: '🐘', label: 'Elephant' },
+    { emoji: '🦒', label: 'Giraffe' },
+    { emoji: '🦘', label: 'Kangaroo' },
+    { emoji: '🦬', label: 'Bison' },
+    { emoji: '🐃', label: 'Water Buffalo' },
+    { emoji: '🐂', label: 'Ox' },
+    { emoji: '🐄', label: 'Cow Face' },
+    
+    // Bears
+    { emoji: '🐻', label: 'Bear' },
+    { emoji: '🐻‍❄️', label: 'Polar Bear' },
+    { emoji: '🐼', label: 'Panda' },
+    { emoji: '🐨', label: 'Koala' },
+    
+    // Primates
+    { emoji: '🐵', label: 'Monkey Face' },
+    { emoji: '🐒', label: 'Monkey' },
+    { emoji: '🦍', label: 'Gorilla' },
+    { emoji: '🦧', label: 'Orangutan' },
+    
+    // Water Animals
+    { emoji: '🐳', label: 'Whale' },
+    { emoji: '🐋', label: 'Whale Face' },
+    { emoji: '🐬', label: 'Dolphin' },
+    { emoji: '🦭', label: 'Seal' },
+    { emoji: '🐟', label: 'Fish' },
+    { emoji: '🐠', label: 'Tropical Fish' },
+    { emoji: '🐡', label: 'Pufferfish' },
+    { emoji: '🦈', label: 'Shark' },
+    { emoji: '🐙', label: 'Octopus' },
+    { emoji: '🦑', label: 'Squid' },
+    { emoji: '🦀', label: 'Crab' },
+    { emoji: '🦞', label: 'Lobster' },
+    { emoji: '🦐', label: 'Shrimp' },
+    
+    // Small Animals
+    { emoji: '🐭', label: 'Mouse Face' },
+    { emoji: '🐁', label: 'Mouse' },
+    { emoji: '🐀', label: 'Rat' },
+    { emoji: '🐹', label: 'Hamster' },
+    { emoji: '🐰', label: 'Rabbit Face' },
+    { emoji: '🐇', label: 'Rabbit' },
+    { emoji: '🐿️', label: 'Chipmunk' },
+    { emoji: '🦫', label: 'Beaver' },
+    { emoji: '🦔', label: 'Hedgehog' },
+    { emoji: '🦇', label: 'Bat' },
+    
+    // Reptiles & Amphibians
+    { emoji: '🐸', label: 'Frog' },
+    { emoji: '🐢', label: 'Turtle' },
+    { emoji: '🦎', label: 'Lizard' },
+    { emoji: '🐍', label: 'Snake' },
+    { emoji: '🐲', label: 'Dragon Face' },
+    { emoji: '🐉', label: 'Dragon' },
+    { emoji: '🦕', label: 'Sauropod' },
+    { emoji: '🦖', label: 'T-Rex' },
+    
+    // Birds
+    { emoji: '🐦', label: 'Bird' },
+    { emoji: '🐧', label: 'Penguin' },
+    { emoji: '🕊️', label: 'Dove' },
+    { emoji: '🦅', label: 'Eagle' },
+    { emoji: '🦆', label: 'Duck' },
+    { emoji: '🦢', label: 'Swan' },
+    { emoji: '🦉', label: 'Owl' },
+    { emoji: '🦤', label: 'Dodo' },
+    { emoji: '🪶', label: 'Feather' },
+    { emoji: '🦜', label: 'Parrot' },
+    { emoji: '🦩', label: 'Flamingo' },
+    { emoji: '🦚', label: 'Peacock' },
+    
+    // Insects & Bugs
+    { emoji: '🐛', label: 'Bug' },
+    { emoji: '🦋', label: 'Butterfly' },
+    { emoji: '🐌', label: 'Snail' },
+    { emoji: '🐞', label: 'Ladybug' },
+    { emoji: '🐜', label: 'Ant' },
+    { emoji: '🪲', label: 'Beetle' },
+    { emoji: '🐝', label: 'Bee' },
+    { emoji: '🪰', label: 'Fly' },
+    { emoji: '🦟', label: 'Mosquito' },
+    { emoji: '🦗', label: 'Cricket' },
+    { emoji: '🕷️', label: 'Spider' },
+    { emoji: '🕸️', label: 'Spider Web' },
+    { emoji: '🦂', label: 'Scorpion' },
+  ];
 
   const saveProfilePhoto = async (emoji) => {
     try {
       setProfilePhoto(emoji);
-      await AsyncStorage.setItem('currentUserPhoto', emoji);
+      setShowAvatarModal(false); // Close modal first
       
-      // Also update Firebase if available
-      if (auth.currentUser) {
-        try {
-          await updateDoc(doc(db, 'users', auth.currentUser.uid), {
-            profilePhoto: emoji,
-          });
-        } catch (error) {
-          console.error('Error updating Firebase photo:', error);
-        }
+      const result = await syncService.saveUserProfile({ photo: emoji });
+      
+      if (result.success) {
+        Alert.alert('Success! 🎉', 'Your avatar has been updated!');
+      } else {
+        Alert.alert('Settings Saved Locally', 'Avatar saved locally and will sync when you\'re back online.');
       }
-      
-      Alert.alert('Success! 🎉', 'Your avatar has been updated!');
     } catch (error) {
       Alert.alert('Error', 'Failed to update avatar. Please try again.');
     }
   };
 
-  const toggleNotifications = (value) => {
+  const toggleNotifications = async (value) => {
     setNotifications(value);
-    updateSetting('notifications', value);
+    await notificationService.updateNotificationSettings({ enabled: value });
+    
+    // Sync all notification settings
+    const result = await syncService.saveNotificationSettings({
+      enabled: value,
+      dailyReminder: dailyReminder,
+      reminderTime: reminderTime
+    });
+    
+    if (!result.success) {
+      Alert.alert('Settings Saved Locally', 'Notification settings will sync when you\'re back online.');
+    }
   };
 
-  const toggleDailyReminder = (value) => {
+  const toggleDailyReminder = async (value) => {
     setDailyReminder(value);
-    updateSetting('dailyReminder', value);
+    await notificationService.updateNotificationSettings({ 
+      dailyReminder: value,
+      reminderTime: reminderTime 
+    });
+    
+    // Sync all notification settings
+    const result = await syncService.saveNotificationSettings({
+      enabled: notifications,
+      dailyReminder: value,
+      reminderTime: reminderTime
+    });
+    
+    if (!result.success) {
+      Alert.alert('Settings Saved Locally', 'Notification settings will sync when you\'re back online.');
+    }
+    
+    if (value) {
+      Alert.alert(
+        '⏰ Daily Reminder Set!',
+        `You'll receive reminders at ${formatTime(reminderTime)} every day.`,
+        [{ text: 'OK' }]
+      );
+    }
+  };
+
+  const handleTimeChange = async (newTime) => {
+    setReminderTime(newTime);
+    await notificationService.updateNotificationSettings({ reminderTime: newTime });
+    
+    // If daily reminder is enabled, reschedule with new time
+    if (dailyReminder) {
+      await notificationService.updateNotificationSettings({ 
+        dailyReminder: true,
+        reminderTime: newTime 
+      });
+    }
+
+    // Sync all notification settings
+    const result = await syncService.saveNotificationSettings({
+      enabled: notifications,
+      dailyReminder: dailyReminder,
+      reminderTime: newTime
+    });
+    
+    if (!result.success) {
+      Alert.alert('Settings Saved Locally', 'Notification settings will sync when you\'re back online.');
+    }
+  };
+
+  const formatTime = (time) => {
+    const [hours, minutes] = time.split(':').map(Number);
+    const date = new Date();
+    date.setHours(hours, minutes, 0, 0);
+    return date.toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    });
   };
 
   const handleLogout = () => {
@@ -376,7 +463,8 @@ export default function SettingsScreen({ navigation }) {
   };
 
   return (
-    <ScrollView style={styles.container}>
+    <View style={styles.container}>
+      <ScrollView style={styles.scrollView}>
       <View style={styles.profileCard}>
         <TouchableOpacity onPress={selectProfilePhoto} style={styles.profilePhotoContainer}>
           <Text style={styles.profilePhoto}>{profilePhoto || '👤'}</Text>
@@ -386,6 +474,7 @@ export default function SettingsScreen({ navigation }) {
         <Text style={styles.profileEmail}>
           {auth.currentUser?.email || currentUser || 'Not logged in'}
         </Text>
+        <SyncStatusIndicator />
       </View>
 
       <View style={styles.section}>
@@ -420,6 +509,24 @@ export default function SettingsScreen({ navigation }) {
             thumbColor={colors.white}
           />
         </View>
+
+        {dailyReminder && (
+          <TouchableOpacity
+            style={styles.timePickerRow}
+            onPress={() => setShowTimePickerModal(true)}
+          >
+            <View style={styles.settingLeft}>
+              <Text style={styles.settingLabel}>Reminder Time</Text>
+              <Text style={styles.settingDescription}>
+                Current: {formatTime(reminderTime)}
+              </Text>
+            </View>
+            <View style={styles.timeDisplay}>
+              <Text style={styles.timeText}>{formatTime(reminderTime)}</Text>
+              <Text style={styles.changeTimeText}>Tap to change</Text>
+            </View>
+          </TouchableOpacity>
+        )}
       </View>
 
       <View style={styles.section}>
@@ -487,6 +594,61 @@ export default function SettingsScreen({ navigation }) {
         <Text style={styles.footerVersion}>PiggyPal v1.0.0</Text>
       </View>
     </ScrollView>
+
+      {/* Avatar Selection Modal */}
+      <Modal
+        visible={showAvatarModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowAvatarModal(false)}
+      >
+        <TouchableWithoutFeedback onPress={() => setShowAvatarModal(false)}>
+          <View style={styles.modalOverlay}>
+            <TouchableWithoutFeedback onPress={() => {}}>
+              <View style={styles.modalContainer}>
+                <View style={styles.modalHeader}>
+                  <Text style={styles.modalTitle}>Choose Your Animal Avatar 🎭</Text>
+                  <Text style={styles.modalSubtitle}>Pick any animal to represent you!</Text>
+                </View>
+                
+                <FlatList
+                  data={avatarOptions}
+                  keyExtractor={(item, index) => index.toString()}
+                  numColumns={4}
+                  showsVerticalScrollIndicator={false}
+                  contentContainerStyle={styles.avatarGrid}
+                  renderItem={({ item }) => (
+                    <TouchableOpacity
+                      style={styles.avatarOption}
+                      onPress={() => saveProfilePhoto(item.emoji)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.avatarEmoji}>{item.emoji}</Text>
+                      <Text style={styles.avatarLabel}>{item.label}</Text>
+                    </TouchableOpacity>
+                  )}
+                />
+                
+                <TouchableOpacity
+                  style={styles.cancelButton}
+                  onPress={() => setShowAvatarModal(false)}
+                >
+                  <Text style={styles.cancelButtonText}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+
+      {/* Time Picker Modal */}
+      <TimePickerModal
+        visible={showTimePickerModal}
+        currentTime={reminderTime}
+        onTimeChange={handleTimeChange}
+        onClose={() => setShowTimePickerModal(false)}
+      />
+    </View>
   );
 }
 
@@ -494,6 +656,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  scrollView: {
+    flex: 1,
   },
   profileCard: {
     backgroundColor: colors.white,
@@ -617,6 +782,100 @@ const styles = StyleSheet.create({
     marginBottom: 5,
   },
   footerVersion: {
+    fontSize: 12,
+    color: colors.textLight,
+  },
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContainer: {
+    backgroundColor: 'white',
+    margin: 20,
+    borderRadius: 20,
+    padding: 20,
+    maxHeight: '80%',
+    width: '90%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  modalHeader: {
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: colors.text,
+    marginBottom: 5,
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: colors.textLight,
+    textAlign: 'center',
+  },
+  avatarGrid: {
+    paddingBottom: 20,
+  },
+  avatarOption: {
+    flex: 1,
+    alignItems: 'center',
+    padding: 10,
+    margin: 5,
+    borderRadius: 10,
+    backgroundColor: colors.background,
+    minWidth: 70,
+    maxWidth: 80,
+  },
+  avatarEmoji: {
+    fontSize: 24,
+    marginBottom: 4,
+  },
+  avatarLabel: {
+    fontSize: 10,
+    color: colors.textLight,
+    textAlign: 'center',
+  },
+  cancelButton: {
+    backgroundColor: colors.textLight,
+    paddingVertical: 12,
+    paddingHorizontal: 30,
+    borderRadius: 25,
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  cancelButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  // Time picker styles
+  timePickerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 15,
+    paddingHorizontal: 20,
+    borderTopWidth: 1,
+    borderTopColor: colors.background,
+    backgroundColor: '#f8f9fa',
+  },
+  timeDisplay: {
+    alignItems: 'flex-end',
+  },
+  timeText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.primary,
+    marginBottom: 2,
+  },
+  changeTimeText: {
     fontSize: 12,
     color: colors.textLight,
   },

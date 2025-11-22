@@ -1,17 +1,21 @@
 // src/screens/VisualsScreen.js
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  Alert,
   Dimensions,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
-  View,
+  View
 } from 'react-native';
 import { BarChart, PieChart } from 'react-native-chart-kit';
 import { colors, motivationalMessages } from '../utils/colors';
+import syncService from '../utils/syncService';
 
 const screenWidth = Dimensions.get('window').width;
 
@@ -21,14 +25,81 @@ export default function VisualsScreen() {
   const [motivation, setMotivation] = useState('');
   const [selectedMonth, setSelectedMonth] = useState(new Date());
   const [allExpenses, setAllExpenses] = useState([]);
+  
+  // Goal-related state
+  const [weeklyGoal, setWeeklyGoal] = useState(0);
+  const [monthlyGoal, setMonthlyGoal] = useState(0);
+  const [goalModalVisible, setGoalModalVisible] = useState(false);
+  const [tempGoalAmount, setTempGoalAmount] = useState('');
+  const [tempGoalPeriod, setTempGoalPeriod] = useState('weekly');
+  const [currentGoalView, setCurrentGoalView] = useState(0); // 0 for weekly, 1 for monthly
+  const goalScrollViewRef = useRef(null);
+  
+  // Navigation functions
+  const goToPreviousMonth = () => {
+    const prevMonth = new Date(selectedMonth);
+    prevMonth.setMonth(prevMonth.getMonth() - 1);
+    setSelectedMonth(prevMonth);
+  };
+
+  const goToNextMonth = () => {
+    const nextMonth = new Date(selectedMonth);
+    nextMonth.setMonth(nextMonth.getMonth() + 1);
+    setSelectedMonth(nextMonth);
+  };
+
+  const goToPreviousGoal = () => {
+    if (weeklyGoal > 0 && monthlyGoal > 0) {
+      const newView = currentGoalView === 0 ? 1 : 0;
+      setCurrentGoalView(newView);
+      goalScrollViewRef.current?.scrollTo({
+        x: newView * (screenWidth - 40),
+        animated: true,
+      });
+    }
+  };
+
+  const goToNextGoal = () => {
+    if (weeklyGoal > 0 && monthlyGoal > 0) {
+      const newView = currentGoalView === 1 ? 0 : 1;
+      setCurrentGoalView(newView);
+      goalScrollViewRef.current?.scrollTo({
+        x: newView * (screenWidth - 40),
+        animated: true,
+      });
+    }
+  };
+
+
 
   useEffect(() => {
     loadExpenseData();
+    loadGoalData();
     
     // Set random motivational message
     const randomMessage =
       motivationalMessages[Math.floor(Math.random() * motivationalMessages.length)];
     setMotivation(randomMessage);
+    
+    // Add sync listener for when app comes back online
+    const unsubscribe = syncService.addListener((event) => {
+      if (event.type === 'network_change' && event.isOnline) {
+        // When back online, try to sync settings from server (including goals)
+        syncService.syncSettingsFromServer().then((result) => {
+          if (result.success && result.data) {
+            // Reload goals if server data was synced
+            loadGoalData();
+          }
+        });
+      }
+      
+      if (event.type === 'settings_synced') {
+        // Settings were updated from server, reload goals
+        loadGoalData();
+      }
+    });
+    
+    return unsubscribe;
   }, []);
 
   // Filter expenses when selected month changes
@@ -167,23 +238,118 @@ export default function VisualsScreen() {
   const total = totalSaving + totalSpending;
   const savingsPercentage = total > 0 ? ((totalSaving / total) * 100).toFixed(1) : 0;
 
+  // Goal-related functions
+  const loadGoalData = async () => {
+    try {
+      const weeklyData = await AsyncStorage.getItem('piggypal_weekly_goal');
+      const monthlyData = await AsyncStorage.getItem('piggypal_monthly_goal');
+      
+      if (weeklyData) {
+        const parsed = JSON.parse(weeklyData);
+        if (parsed && typeof parsed === 'number') {
+          setWeeklyGoal(parsed);
+        }
+      }
+      
+      if (monthlyData) {
+        const parsed = JSON.parse(monthlyData);
+        if (parsed && typeof parsed === 'number') {
+          setMonthlyGoal(parsed);
+        }
+      }
+    } catch (error) {
+      // Reset to defaults if any error
+      setWeeklyGoal(0);
+      setMonthlyGoal(0);
+    }
+  };
+
+  const saveGoal = async () => {
+    try {
+      if (!tempGoalAmount || tempGoalAmount.trim() === '') {
+        Alert.alert('Error', 'Please enter a goal amount.');
+        return;
+      }
+
+      const amount = parseFloat(tempGoalAmount);
+      if (isNaN(amount) || amount <= 0) {
+        Alert.alert('Error', 'Please enter a valid amount greater than 0.');
+        return;
+      }
+
+      // Update local state
+      if (tempGoalPeriod === 'weekly') {
+        setWeeklyGoal(amount);
+      } else {
+        setMonthlyGoal(amount);
+      }
+
+      // Save and sync goal
+      const result = await syncService.saveGoalSetting(tempGoalPeriod, amount);
+      
+      setGoalModalVisible(false);
+      setTempGoalAmount('');
+      
+      if (result.success) {
+        Alert.alert('Success! 🎉', `Your ${tempGoalPeriod} goal of $${amount} has been set!`);
+      } else {
+        Alert.alert('Goal Saved Locally! 🎯', `Your ${tempGoalPeriod} goal of $${amount} has been saved and will sync when you're back online.`);
+      }
+      
+    } catch (error) {
+      Alert.alert('Error', 'Failed to save goal. Please try again.');
+    }
+  };
+
+  const openGoalModal = (editPeriod = null) => {
+    if (editPeriod === 'weekly' && weeklyGoal > 0) {
+      setTempGoalAmount(weeklyGoal.toString());
+      setTempGoalPeriod('weekly');
+    } else if (editPeriod === 'monthly' && monthlyGoal > 0) {
+      setTempGoalAmount(monthlyGoal.toString());
+      setTempGoalPeriod('monthly');
+    } else {
+      setTempGoalAmount('');
+      setTempGoalPeriod('weekly');
+    }
+    setGoalModalVisible(true);
+  };
+
+  const getWeeklyProgress = () => {
+    if (weeklyGoal <= 0) return { progress: 0, isComplete: false };
+    const progress = Math.min((totalSaving / weeklyGoal) * 100, 100);
+    const isComplete = totalSaving >= weeklyGoal;
+    return { progress, isComplete };
+  };
+
+  const getMonthlyProgress = () => {
+    if (monthlyGoal <= 0) return { progress: 0, isComplete: false };
+    const progress = Math.min((totalSaving / monthlyGoal) * 100, 100);
+    const isComplete = totalSaving >= monthlyGoal;
+    return { progress, isComplete };
+  };
+
+  const getProgressEmoji = (progress) => {
+    if (progress === 0) return '😴'; // No progress
+    if (progress < 25) return '😞'; // Sad face
+    if (progress < 50) return '😐'; // Neutral
+    if (progress < 75) return '🙂'; // Slight smile
+    if (progress < 100) return '😊'; // Happy
+    return '🤩'; // Star eyes - complete!
+  };
+
+  const weeklyProgress = getWeeklyProgress();
+  const monthlyProgress = getMonthlyProgress();
+
   return (
     <ScrollView style={styles.container}>
-      <View style={styles.motivationCard}>
-        <Text style={styles.motivationEmoji}>✨</Text>
-        <Text style={styles.motivationText}>{motivation}</Text>
-      </View>
-
+      {/* Month Selector at Top */}
       <View style={styles.monthSelector}>
         <Text style={styles.monthSelectorTitle}>📅 View Month:</Text>
         <View style={styles.monthButtons}>
           <TouchableOpacity 
             style={styles.monthNavButton}
-            onPress={() => {
-              const prevMonth = new Date(selectedMonth);
-              prevMonth.setMonth(prevMonth.getMonth() - 1);
-              setSelectedMonth(prevMonth);
-            }}
+            onPress={goToPreviousMonth}
           >
             <Text style={styles.monthNavButtonText}>←</Text>
           </TouchableOpacity>
@@ -196,15 +362,111 @@ export default function VisualsScreen() {
           
           <TouchableOpacity 
             style={styles.monthNavButton}
-            onPress={() => {
-              const nextMonth = new Date(selectedMonth);
-              nextMonth.setMonth(nextMonth.getMonth() + 1);
-              setSelectedMonth(nextMonth);
-            }}
+            onPress={goToNextMonth}
           >
             <Text style={styles.monthNavButtonText}>→</Text>
           </TouchableOpacity>
         </View>
+      </View>
+
+      {/* Combined Goals and Progress Section */}
+      <View style={styles.piggyBankContainer}>
+        <Text style={styles.goalTitle}>Your Savings Goals</Text>
+        <TouchableOpacity onPress={openGoalModal} style={styles.targetSection}>
+          <Text style={styles.motivationEmoji}>🎯</Text>
+          <Text style={styles.tapToEditHint}>Tap target to edit</Text>
+        </TouchableOpacity>
+        
+        {weeklyGoal > 0 || monthlyGoal > 0 ? (
+          <View>
+            <ScrollView 
+              ref={goalScrollViewRef}
+              horizontal 
+              pagingEnabled 
+              showsHorizontalScrollIndicator={false}
+              style={styles.goalScrollView}
+              onMomentumScrollEnd={(event) => {
+                const page = Math.round(event.nativeEvent.contentOffset.x / (screenWidth - 40));
+                setCurrentGoalView(page);
+              }}
+            >
+              {/* Weekly Goal View */}
+              {weeklyGoal > 0 && (
+                <View style={[styles.goalView, { width: screenWidth - 40 }]}>
+                  <Text style={styles.goalViewTitle}>📅 Weekly Goal</Text>
+                  <View style={styles.piggyBankProgress}>
+                    <Text style={styles.progressEmoji}>{getProgressEmoji(weeklyProgress.progress)}</Text>
+                    <View style={styles.progressBar}>
+                      <View 
+                        style={[
+                          styles.progressFill, 
+                          { width: `${weeklyProgress.progress}%` },
+                          weeklyProgress.isComplete && styles.progressComplete
+                        ]} 
+                      />
+                    </View>
+                    <Text style={styles.progressText}>
+                      ${totalSaving.toFixed(2)} out of ${weeklyGoal}
+                    </Text>
+                    <Text style={styles.progressSubtext}>
+                      {weeklyProgress.isComplete 
+                        ? `🎉 Weekly Goal Achieved!`
+                        : `${weeklyProgress.progress.toFixed(0)}% Complete - Keep going!`
+                      }
+                    </Text>
+                  </View>
+                </View>
+              )}
+
+              {/* Monthly Goal View */}
+              {monthlyGoal > 0 && (
+                <View style={[styles.goalView, { width: screenWidth - 40 }]}>
+                  <Text style={styles.goalViewTitle}>🗓️ Monthly Goal</Text>
+                  <View style={styles.piggyBankProgress}>
+                    <Text style={styles.progressEmoji}>{getProgressEmoji(monthlyProgress.progress)}</Text>
+                    <View style={styles.progressBar}>
+                      <View 
+                        style={[
+                          styles.progressFill, 
+                          { width: `${monthlyProgress.progress}%` },
+                          monthlyProgress.isComplete && styles.progressComplete
+                        ]} 
+                      />
+                    </View>
+                    <Text style={styles.progressText}>
+                      ${totalSaving.toFixed(2)} out of ${monthlyGoal}
+                    </Text>
+                    <Text style={styles.progressSubtext}>
+                      {monthlyProgress.isComplete 
+                        ? `🎉 Monthly Goal Achieved!`
+                        : `${monthlyProgress.progress.toFixed(0)}% Complete - Keep going!`
+                      }
+                    </Text>
+                  </View>
+                </View>
+              )}
+            </ScrollView>
+
+            {/* Page Dots - only show when both goals exist */}
+            {weeklyGoal > 0 && monthlyGoal > 0 && (
+              <View style={styles.pageIndicator}>
+                <View style={[
+                  styles.pageDot, 
+                  currentGoalView === 0 && styles.activeDot
+                ]} />
+                <View style={[
+                  styles.pageDot, 
+                  currentGoalView === 1 && styles.activeDot
+                ]} />
+              </View>
+            )}
+          </View>
+        ) : (
+          <TouchableOpacity onPress={openGoalModal} style={styles.noGoalsPrompt}>
+            <Text style={styles.motivationEmoji}>🎯</Text>
+            <Text style={styles.motivationText}>Tap to set your savings goals!</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       <View style={styles.summaryCards}>
@@ -225,16 +487,43 @@ export default function VisualsScreen() {
         <>
           <View style={styles.chartCard}>
             <Text style={styles.chartTitle}>Money Breakdown 📊</Text>
-            <PieChart
-              data={pieData}
-              width={screenWidth - 60}
-              height={220}
-              chartConfig={chartConfig}
-              accessor="amount"
-              backgroundColor="transparent"
-              paddingLeft="15"
-              absolute
-            />
+            <View style={styles.pieChartContainer}>
+              <PieChart
+                data={pieData}
+                width={screenWidth - 60}
+                height={220}
+                chartConfig={{
+                  ...chartConfig,
+                  propsForLabels: {
+                    fontSize: 0, // Hide the amount labels on the chart
+                  },
+                }}
+                accessor="amount"
+                backgroundColor="transparent"
+                paddingLeft="15"
+                absolute
+                hasLegend={true}
+              />
+            </View>
+            
+            {/* Savings Rate Section */}
+            <View style={styles.savingsRateSection}>
+              <Text style={styles.progressTitle}>Savings Rate</Text>
+              <Text style={styles.progressPercentage}>{savingsPercentage}%</Text>
+              <View style={styles.progressBarContainer}>
+                <View
+                  style={[
+                    styles.progressBarFill,
+                    { width: `${savingsPercentage}%` },
+                  ]}
+                />
+              </View>
+              <Text style={styles.progressText}>
+                {savingsPercentage > 50
+                  ? 'Amazing! You\'re saving more than spending! 🌟'
+                  : 'Keep going! Try to save a bit more! 💪'}
+              </Text>
+            </View>
           </View>
 
           <View style={styles.chartCard}>
@@ -259,7 +548,7 @@ export default function VisualsScreen() {
                   categoryPercentage: 0.98,
                   decimalPlaces: 0,
                   propsForLabels: {
-                    fontSize: 8,
+                    fontSize: 12,
                   },
                   paddingLeft: 0,
                   paddingRight: 0,
@@ -285,23 +574,81 @@ export default function VisualsScreen() {
         </View>
       )}
 
-      <View style={styles.progressCard}>
-        <Text style={styles.progressTitle}>Savings Rate</Text>
-        <Text style={styles.progressPercentage}>{savingsPercentage}%</Text>
-        <View style={styles.progressBarContainer}>
-          <View
-            style={[
-              styles.progressBarFill,
-              { width: `${savingsPercentage}%` },
-            ]}
-          />
+
+
+      {/* Goal Setting Modal */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={goalModalVisible}
+        onRequestClose={() => setGoalModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>
+              🎯 {(tempGoalPeriod === 'weekly' && weeklyGoal > 0) || (tempGoalPeriod === 'monthly' && monthlyGoal > 0) 
+                ? 'Edit Your Savings Goal' 
+                : 'Set Your Savings Goal'}
+            </Text>
+            
+            <Text style={styles.modalLabel}>Goal Amount ($):</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={tempGoalAmount}
+              onChangeText={setTempGoalAmount}
+              placeholder="Enter amount (e.g., 500)"
+              keyboardType="numeric"
+            />
+            
+            <Text style={styles.modalLabel}>Goal Period:</Text>
+            <View style={styles.periodButtons}>
+              <TouchableOpacity
+                style={[
+                  styles.periodButton,
+                  tempGoalPeriod === 'weekly' && styles.periodButtonActive
+                ]}
+                onPress={() => setTempGoalPeriod('weekly')}
+              >
+                <Text style={[
+                  styles.periodButtonText,
+                  tempGoalPeriod === 'weekly' && styles.periodButtonTextActive
+                ]}>
+                  Weekly
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.periodButton,
+                  tempGoalPeriod === 'monthly' && styles.periodButtonActive
+                ]}
+                onPress={() => setTempGoalPeriod('monthly')}
+              >
+                <Text style={[
+                  styles.periodButtonText,
+                  tempGoalPeriod === 'monthly' && styles.periodButtonTextActive
+                ]}>
+                  Monthly
+                </Text>
+              </TouchableOpacity>
+            </View>
+            
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={styles.modalButtonCancel}
+                onPress={() => setGoalModalVisible(false)}
+              >
+                <Text style={styles.modalButtonCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalButtonSave}
+                onPress={saveGoal}
+              >
+                <Text style={styles.modalButtonSaveText}>Save Goal</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         </View>
-        <Text style={styles.progressText}>
-          {savingsPercentage > 50
-            ? 'Amazing! You\'re saving more than spending! 🌟'
-            : 'Keep going! Try to save a bit more! 💪'}
-        </Text>
-      </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -328,15 +675,22 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   motivationText: {
-    fontSize: 20,
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.textLight,
+    textAlign: 'center',
+  },
+  goalTitle: {
+    fontSize: 22,
     fontWeight: 'bold',
     color: colors.text,
     textAlign: 'center',
+    marginBottom: 10,
   },
   monthSelector: {
     backgroundColor: colors.white,
     margin: 20,
-    marginTop: 0,
+    marginTop: 15,
     padding: 20,
     borderRadius: 20,
     shadowColor: '#000',
@@ -424,6 +778,12 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
+  savingsRateSection: {
+    marginTop: 20,
+    paddingTop: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#F3F4F6',
+  },
   progressTitle: {
     fontSize: 18,
     fontWeight: 'bold',
@@ -474,6 +834,11 @@ const styles = StyleSheet.create({
     color: colors.text,
     marginBottom: 5,
   },
+  pieChartContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+  },
   chartSubtitle: {
     fontSize: 14,
     color: colors.textLight,
@@ -506,5 +871,283 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: colors.textLight,
     textAlign: 'center',
+  },
+  goalProgress: {
+    fontSize: 14,
+    color: colors.textLight,
+    marginTop: 4,
+    textAlign: 'center',
+  },
+  tapToEditHint: {
+    fontSize: 12,
+    color: colors.textLight,
+    marginTop: 8,
+    marginBottom: 8,
+    textAlign: 'center',
+    fontStyle: 'italic',
+  },
+  goalProgressMain: {
+    fontSize: 16,
+    color: colors.text,
+    marginTop: 6,
+    textAlign: 'center',
+    fontWeight: '600',
+  },
+  // Piggy Bank Progress Styles
+  piggyBankContainer: {
+    backgroundColor: colors.accent,
+    margin: 20,
+    marginTop: 0,
+    padding: 20,
+    borderRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  piggyBankTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: colors.text,
+    textAlign: 'center',
+    marginBottom: 15,
+  },
+  piggyBankProgress: {
+    alignItems: 'center',
+  },
+  piggyBank: {
+    alignItems: 'center',
+    marginBottom: 15,
+  },
+  piggyBankEmoji: {
+    fontSize: 60,
+    marginBottom: 10,
+  },
+  progressBar: {
+    width: 200,
+    height: 20,
+    backgroundColor: '#f0f0f0',
+    borderRadius: 10,
+    overflow: 'hidden',
+    marginBottom: 10,
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: colors.primary,
+    borderRadius: 10,
+    minWidth: 2,
+  },
+  progressComplete: {
+    backgroundColor: colors.success,
+  },
+  progressContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+  },
+  progressNavButton: {
+    backgroundColor: colors.primary,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  progressNavButtonText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: colors.white,
+  },
+
+  moneyCoins: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    height: 30,
+  },
+  coin: {
+    fontSize: 20,
+    marginHorizontal: 2,
+  },
+  celebration: {
+    fontSize: 24,
+    marginLeft: 5,
+  },
+  progressText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text,
+    textAlign: 'center',
+  },
+  swipeHint: {
+    fontSize: 12,
+    color: colors.textLight,
+    textAlign: 'center',
+    marginBottom: 10,
+    fontStyle: 'italic',
+  },
+  goalScrollView: {
+    marginHorizontal: -20,
+  },
+  goalView: {
+    paddingHorizontal: 20,
+  },
+  pageIndicator: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 15,
+  },
+  pageDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.textLight,
+    marginHorizontal: 4,
+    opacity: 0.3,
+  },
+  activeDot: {
+    backgroundColor: colors.primary,
+    opacity: 1,
+    transform: [{ scale: 1.2 }],
+  },
+  goalTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 5,
+  },
+  goalViewTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: colors.text,
+    textAlign: 'center',
+    marginHorizontal: 15,
+  },
+  goalArrow: {
+    fontSize: 18,
+    color: colors.textLight,
+    fontWeight: 'bold',
+  },
+  editHint: {
+    fontSize: 12,
+    color: colors.textLight,
+    textAlign: 'center',
+    marginBottom: 10,
+    fontStyle: 'italic',
+  },
+  progressEmoji: {
+    fontSize: 40,
+    marginBottom: 5,
+  },
+  progressSubtext: {
+    fontSize: 14,
+    color: colors.textLight,
+    textAlign: 'center',
+    marginTop: 5,
+  },
+  noGoalsPrompt: {
+    alignItems: 'center',
+    paddingVertical: 20,
+  },
+  targetSection: {
+    alignItems: 'center',
+    marginVertical: 5,
+  },
+  // Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    backgroundColor: colors.white,
+    borderRadius: 20,
+    padding: 30,
+    margin: 20,
+    width: '90%',
+    maxWidth: 400,
+  },
+  modalTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: colors.text,
+    textAlign: 'center',
+    marginBottom: 25,
+  },
+  modalLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text,
+    marginBottom: 8,
+    marginTop: 15,
+  },
+  modalInput: {
+    borderWidth: 2,
+    borderColor: colors.primary,
+    borderRadius: 10,
+    padding: 15,
+    fontSize: 16,
+    backgroundColor: colors.background,
+  },
+  periodButtons: {
+    flexDirection: 'row',
+    marginTop: 10,
+    marginBottom: 20,
+  },
+  periodButton: {
+    flex: 1,
+    padding: 15,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: colors.textLight,
+    marginHorizontal: 5,
+    alignItems: 'center',
+  },
+  periodButtonActive: {
+    borderColor: colors.primary,
+    backgroundColor: '#FF6B9D20',
+  },
+  periodButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.textLight,
+  },
+  periodButtonTextActive: {
+    color: colors.primary,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    marginTop: 25,
+  },
+  modalButtonCancel: {
+    flex: 1,
+    padding: 15,
+    borderRadius: 10,
+    marginRight: 10,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: colors.textLight,
+  },
+  modalButtonCancelText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.textLight,
+  },
+  modalButtonSave: {
+    flex: 1,
+    padding: 15,
+    borderRadius: 10,
+    marginLeft: 10,
+    alignItems: 'center',
+    backgroundColor: colors.primary,
+  },
+  modalButtonSaveText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: 'white',
   },
 });

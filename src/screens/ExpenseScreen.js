@@ -4,21 +4,21 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { useFocusEffect } from '@react-navigation/native';
 import { useCallback, useEffect, useState } from 'react';
 import {
-  Alert,
-  Animated,
-  FlatList,
-  Keyboard,
-  Modal,
-  Platform,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  TouchableWithoutFeedback,
-  View,
+    Alert,
+    FlatList,
+    Keyboard,
+    Modal,
+    Platform,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    TouchableWithoutFeedback,
+    View
 } from 'react-native';
 import ConfettiCannon from 'react-native-confetti-cannon';
 import { colors } from '../utils/colors';
+import syncService from '../utils/syncService';
 
 // Motivational messages for the header
 const motivationalMessages = [
@@ -45,10 +45,7 @@ export default function ExpenseScreen() {
   // Confetti state
   const [showConfetti, setShowConfetti] = useState(false);
 
-  // Animation values for FAB
-  const translateYValue = new Animated.Value(0);
-  const shadowOpacityValue = new Animated.Value(0.15);
-  const shadowHeightValue = new Animated.Value(12);
+  // No animation values needed
 
   useEffect(() => {
     loadCurrentUser();
@@ -93,46 +90,7 @@ export default function ExpenseScreen() {
     }
   };
 
-  // Animation functions with dynamic shadows
-  const animatePressIn = () => {
-    Animated.parallel([
-      Animated.timing(translateYValue, {
-        toValue: -6, // Move down
-        duration: 100,
-        useNativeDriver: true,
-      }),
-      Animated.timing(shadowOpacityValue, {
-        toValue: 0.2, // Stronger shadow when pressed
-        duration: 100,
-        useNativeDriver: false,
-      }),
-      Animated.timing(shadowHeightValue, {
-        toValue: 4, // Smaller shadow when pressed (like CSS active state)
-        duration: 100,
-        useNativeDriver: false,
-      }),
-    ]).start();
-  };
-
-  const animatePressOut = () => {
-    Animated.parallel([
-      Animated.timing(translateYValue, {
-        toValue: 0,
-        duration: 150,
-        useNativeDriver: true,
-      }),
-      Animated.timing(shadowOpacityValue, {
-        toValue: 0.15, // Return to normal shadow
-        duration: 150,
-        useNativeDriver: false,
-      }),
-      Animated.timing(shadowHeightValue, {
-        toValue: 12, // Return to normal shadow height
-        duration: 150,
-        useNativeDriver: false,
-      }),
-    ]).start();
-  };
+  // No animation functions needed
 
   const openAddModal = () => {
     setEditingExpense(null);
@@ -171,53 +129,37 @@ export default function ExpenseScreen() {
         return;
       }
 
-      let updatedExpenses = [...expenses];
+      const expenseData = {
+        id: editingExpense?.id || Date.now().toString(),
+        userId: user,
+        title,
+        amount: numAmount,
+        type,
+        date: selectedDate.toISOString(),
+      };
 
-      if (editingExpense) {
-        // Update existing expense
-        const index = updatedExpenses.findIndex(exp => exp.id === editingExpense.id);
-        if (index !== -1) {
-          updatedExpenses[index] = {
-            ...updatedExpenses[index],
-            title,
-            amount: numAmount,
-            type,
-            date: selectedDate.toISOString(),
-          };
-        }
-        // Silent update - no popup
-      } else {
-        // Add new expense
-        const newExpense = {
-          id: Date.now().toString(), // Simple ID generation
-          userId: user,
-          title,
-          amount: numAmount,
-          type,
-          date: selectedDate.toISOString(),
-        };
-        updatedExpenses.unshift(newExpense); // Add to beginning for newest first
+      // Use sync service to save expense
+      const result = await syncService.saveExpense(expenseData, user);
+      
+      if (result.success) {
+        setExpenses(result.data);
+        setModalVisible(false);
         
-        // Trigger confetti for savings immediately!
-        if (type === 'saving') {
+        // Trigger confetti for new savings!
+        if (!editingExpense && type === 'saving') {
           setShowConfetti(true);
-          // Auto-hide confetti after 4 seconds
           setTimeout(() => setShowConfetti(false), 4000);
         }
         
-        // No alert popup - just confetti for savings or silent success for spending
+        // Clear form
+        setTitle('');
+        setAmount('');
+        setType('spending');
+        setEditingExpense(null);
+        
+      } else {
+        Alert.alert('Error', `Failed to save: ${result.error}`);
       }
-
-      // Save to AsyncStorage
-      await AsyncStorage.setItem(`expenses_${user}`, JSON.stringify(updatedExpenses));
-      setExpenses(updatedExpenses);
-      setModalVisible(false);
-      
-      // Clear form
-      setTitle('');
-      setAmount('');
-      setType('spending');
-      setEditingExpense(null);
       
     } catch (error) {
       Alert.alert('Error', 'Something went wrong! 😅');
@@ -242,10 +184,13 @@ export default function ExpenseScreen() {
                 return;
               }
 
-              const updatedExpenses = expenses.filter(exp => exp.id !== expense.id);
-              await AsyncStorage.setItem(`expenses_${user}`, JSON.stringify(updatedExpenses));
-              setExpenses(updatedExpenses);
-              // Silent delete - no popup
+              const result = await syncService.deleteExpense(expense.id, user);
+              
+              if (result.success) {
+                setExpenses(result.data);
+              } else {
+                Alert.alert('Error', `Failed to delete: ${result.error}`);
+              }
             } catch (error) {
               Alert.alert('Error', 'Failed to delete! 😅');
             }
@@ -464,40 +409,17 @@ export default function ExpenseScreen() {
 
       {/* Floating Action Button with Custom Shadow Layers */}
       <View style={styles.fabShadowContainer}>
-        {/* Bottom shadow layer - mimics the CSS solid shadow */}
-        <Animated.View
-          style={[
-            styles.fabBottomShadow,
-            {
-              transform: [{ translateY: translateYValue }],
-            },
-          ]}
-        />
+        {/* Bottom shadow layer */}
+        <View style={styles.fabBottomShadow} />
         
-        {/* Main button with animated blur shadow */}
-        <Animated.View
-          style={[
-            styles.fab,
-            {
-              transform: [{ translateY: translateYValue }],
-              shadowOpacity: shadowOpacityValue,
-              shadowOffset: {
-                width: 0,
-                height: shadowHeightValue,
-              },
-            },
-          ]}
+        {/* Main button */}
+        <TouchableOpacity
+          style={[styles.fab, styles.fabTouchable]}
+          onPress={openAddModal}
+          activeOpacity={0.8}
         >
-          <TouchableOpacity
-            style={styles.fabTouchable}
-            onPress={openAddModal}
-            onPressIn={animatePressIn}
-            onPressOut={animatePressOut}
-            activeOpacity={1}
-          >
-            <Text style={styles.fabText}>+</Text>
-          </TouchableOpacity>
-        </Animated.View>
+          <Text style={styles.fabText}>+</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Confetti Effect */}
@@ -809,7 +731,7 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: '#EC4899', // bg-pink-500
+    backgroundColor: colors.primary, // Pink color to match header
     zIndex: 2,
     // Blur shadow - mimics 0_12px_24px_rgba(0,0,0,0.15)
     shadowColor: '#000',

@@ -2,7 +2,7 @@
 export const colors = {
   primary: '#FF6B9D',      // Pink
   secondary: '#A78BFA',    // Purple
-  accent: '#FCD34D',       // Yellow
+  accent: '#FEF247',       // Yellow
   success: '#4ADE80',      // Green
   danger: '#F87171',       // Red
   background: '#FDF4FF',   // Light purple
@@ -12,6 +12,9 @@ export const colors = {
   cardBg: '#FFFFFF',
   spending: '#F87171',     // Red for spending
   saving: '#4ADE80',       // Green for saving
+  // Sync status colors
+  error: '#ff4757',        // Red for errors
+  warning: '#ffa502',      // Orange for warnings
 };
 
 export const motivationalMessages = [
