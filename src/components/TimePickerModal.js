@@ -3,7 +3,6 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { useState } from 'react';
 import {
     Modal,
-    Platform,
     StyleSheet,
     Text,
     TouchableOpacity,
@@ -21,19 +20,7 @@ const TimePickerModal = ({ visible, currentTime, onTimeChange, onClose }) => {
   });
 
   const handleTimeChange = (event, selectedTime) => {
-    if (Platform.OS === 'android') {
-      if (event.type === 'dismissed') {
-        onClose();
-        return;
-      }
-      if (event.type === 'set' && selectedTime) {
-        const timeString = selectedTime.toTimeString().slice(0, 5);
-        onTimeChange(timeString);
-        onClose();
-        return;
-      }
-    }
-    
+    // iOS handling
     if (selectedTime) {
       setTempTime(selectedTime);
     }
@@ -56,20 +43,7 @@ const TimePickerModal = ({ visible, currentTime, onTimeChange, onClose }) => {
     });
   };
 
-  if (Platform.OS === 'android') {
-    // Android shows native picker immediately
-    return (
-      <DateTimePicker
-        value={tempTime}
-        mode="time"
-        is24Hour={false}
-        display="default"
-        onChange={handleTimeChange}
-      />
-    );
-  }
-
-  // iOS custom modal
+  // iOS modal
   return (
     <Modal
       visible={visible}
