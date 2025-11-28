@@ -178,6 +178,144 @@ class NotificationService {
     }
   }
 
+  // Get random motivational message
+  getRandomMotivationalMessage() {
+    const { motivationalMessages } = require('./colors');
+    return motivationalMessages[Math.floor(Math.random() * motivationalMessages.length)];
+  }
+
+  // Schedule flexible reminder (daily, weekly, or once)
+  async scheduleFlexibleReminder(reminderConfig) {
+    try {
+      const { type, time, days, title, message } = reminderConfig;
+      
+      // Cancel existing reminder first
+      await this.cancelFlexibleReminder(type);
+      
+      // Parse time
+      const [hours, minutes] = time.split(':').map(Number);
+      
+      let trigger;
+      let identifier;
+      
+      if (type === 'once') {
+        // Schedule once - use the provided date or next occurrence of time
+        const triggerDate = new Date();
+        triggerDate.setHours(hours, minutes, 0, 0);
+        
+        // If time has passed today, schedule for tomorrow
+        if (triggerDate <= new Date()) {
+          triggerDate.setDate(triggerDate.getDate() + 1);
+        }
+        
+        trigger = { date: triggerDate };
+        
+      } else if (type === 'daily') {
+        // Schedule daily
+        trigger = {
+          hour: hours,
+          minute: minutes,
+          repeats: true,
+        };
+        
+      } else if (type === 'weekly') {
+        // Schedule weekly - for each selected day
+        const identifiers = [];
+        
+        for (const day of days) {
+          const weeklyId = await Notifications.scheduleNotificationAsync({
+            content: {
+              title: title || '💰 PiggyPal Reminder',
+              body: message || this.getRandomMotivationalMessage(),
+              data: { type: 'weekly_reminder', day },
+            },
+            trigger: {
+              weekday: day, // 1 = Sunday, 2 = Monday, etc.
+              hour: hours,
+              minute: minutes,
+              repeats: true,
+            },
+          });
+          identifiers.push(weeklyId);
+        }
+        
+        // Store all weekly identifiers
+        await AsyncStorage.setItem(`${type}_reminder_ids`, JSON.stringify(identifiers));
+        console.log(`Weekly reminders scheduled for days: ${days.join(', ')}`);
+        return identifiers;
+      }
+
+      // Schedule single notification (once or daily)
+      if (trigger) {
+        identifier = await Notifications.scheduleNotificationAsync({
+          content: {
+            title: title || '💰 PiggyPal Reminder',
+            body: message || this.getRandomMotivationalMessage(),
+            data: { type: `${type}_reminder` },
+          },
+          trigger,
+        });
+
+        // Store the identifier
+        await AsyncStorage.setItem(`${type}_reminder_id`, identifier);
+        console.log(`${type} reminder scheduled for ${time}`);
+      }
+      
+      return identifier;
+    } catch (error) {
+      console.error(`Error scheduling ${reminderConfig.type} reminder:`, error);
+      return null;
+    }
+  }
+
+  // Cancel flexible reminder
+  async cancelFlexibleReminder(type) {
+    try {
+      if (type === 'weekly') {
+        // Cancel all weekly reminders
+        const reminderIds = await AsyncStorage.getItem(`${type}_reminder_ids`);
+        if (reminderIds) {
+          const ids = JSON.parse(reminderIds);
+          for (const id of ids) {
+            await Notifications.cancelScheduledNotificationAsync(id);
+          }
+          await AsyncStorage.removeItem(`${type}_reminder_ids`);
+        }
+      } else {
+        // Cancel single reminder
+        const reminderId = await AsyncStorage.getItem(`${type}_reminder_id`);
+        if (reminderId) {
+          await Notifications.cancelScheduledNotificationAsync(reminderId);
+          await AsyncStorage.removeItem(`${type}_reminder_id`);
+        }
+      }
+      console.log(`${type} reminder cancelled`);
+    } catch (error) {
+      console.error(`Error cancelling ${type} reminder:`, error);
+    }
+  }
+
+  // Demonstrate notification (for testing in Expo Go)
+  async demonstrateNotification(type = 'daily') {
+    try {
+      const motivationalMsg = this.getRandomMotivationalMessage();
+      
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: '🎯 PiggyPal Demo Notification',
+          body: `This is how your ${type} reminder would look: ${motivationalMsg}`,
+          data: { type: 'demo', originalType: type },
+        },
+        trigger: { seconds: 2 }, // Show in 2 seconds
+      });
+      
+      return true;
+    } catch (error) {
+      console.error('Error demonstrating notification:', error);
+      return false;
+    }
+  }
+
   // Send goal achievement notification
   async sendGoalAchievementNotification(goalType, amount) {
     try {

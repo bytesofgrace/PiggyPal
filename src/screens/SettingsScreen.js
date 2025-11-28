@@ -16,10 +16,16 @@ import {
     TouchableWithoutFeedback,
     View
 } from 'react-native';
+import NotificationDemo from '../components/NotificationDemo';
+import ReminderConfigModal from '../components/ReminderConfigModal';
 import SyncStatusIndicator from '../components/SyncStatusIndicator';
 import TimePickerModal from '../components/TimePickerModal';
 import { auth, db } from '../config/firebase';
 import { colors } from '../utils/colors';
+import { 
+  cancelFlexibleReminder,
+  scheduleFlexibleReminder
+} from '../utils/notificationService';
 import notificationService from '../utils/notificationService';
 import syncService from '../utils/syncService';
 
@@ -30,8 +36,10 @@ export default function SettingsScreen({ navigation }) {
   const [notifications, setNotifications] = useState(true);
   const [dailyReminder, setDailyReminder] = useState(false);
   const [reminderTime, setReminderTime] = useState('19:00');
+  const [flexibleReminder, setFlexibleReminder] = useState(null);
   const [showAvatarModal, setShowAvatarModal] = useState(false);
   const [showTimePickerModal, setShowTimePickerModal] = useState(false);
+  const [showReminderConfig, setShowReminderConfig] = useState(false);
 
   useEffect(() => {
     loadUserSettings();
@@ -67,6 +75,12 @@ export default function SettingsScreen({ navigation }) {
       setNotifications(notificationSettings.enabled);
       setDailyReminder(notificationSettings.dailyReminder);
       setReminderTime(notificationSettings.reminderTime);
+      
+      // Load flexible reminder settings
+      const storedFlexibleReminder = await AsyncStorage.getItem('flexibleReminderConfig');
+      if (storedFlexibleReminder) {
+        setFlexibleReminder(JSON.parse(storedFlexibleReminder));
+      }
       
       // Load from AsyncStorage (local auth)
       const user = await AsyncStorage.getItem('currentUser');
@@ -112,6 +126,86 @@ export default function SettingsScreen({ navigation }) {
   const selectProfilePhoto = () => {
     setShowAvatarModal(true);
   };
+
+  const handleSaveFlexibleReminder = async (config) => {
+    try {
+      // Cancel existing flexible reminders
+      if (flexibleReminder) {
+        await cancelFlexibleReminder();
+      }
+
+      // Schedule new flexible reminder
+      await scheduleFlexibleReminder(config);
+
+      // Save configuration to AsyncStorage
+      await AsyncStorage.setItem('flexibleReminderConfig', JSON.stringify(config));
+      setFlexibleReminder(config);
+
+      Alert.alert(
+        '✅ Reminder Set!',
+        `Your ${config.type} reminder has been scheduled for ${formatTime(config.time)}${
+          config.type === 'weekly' 
+            ? ` on ${config.days.map(id => DAYS_OF_WEEK.find(d => d.id === id)?.name).join(', ')}` 
+            : ''
+        }.`,
+        [{ text: 'Great!', style: 'default' }]
+      );
+    } catch (error) {
+      console.error('Error saving flexible reminder:', error);
+      Alert.alert(
+        'Error',
+        'Failed to set reminder. Please check your notification permissions and try again.',
+        [{ text: 'OK', style: 'default' }]
+      );
+    }
+  };
+
+  const handleCancelFlexibleReminder = async () => {
+    Alert.alert(
+      'Cancel Reminder',
+      'Are you sure you want to cancel your flexible reminder?',
+      [
+        { text: 'No', style: 'cancel' },
+        {
+          text: 'Yes, Cancel',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await cancelFlexibleReminder();
+              await AsyncStorage.removeItem('flexibleReminderConfig');
+              setFlexibleReminder(null);
+              Alert.alert('Reminder Cancelled', 'Your flexible reminder has been cancelled.');
+            } catch (error) {
+              console.error('Error cancelling reminder:', error);
+              Alert.alert('Error', 'Failed to cancel reminder.');
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const formatTime = (time) => {
+    const [hours, minutes] = time.split(':').map(Number);
+    const date = new Date();
+    date.setHours(hours, minutes, 0, 0);
+    return date.toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    });
+  };
+
+  // Days of week for display
+  const DAYS_OF_WEEK = [
+    { id: 1, name: 'Sunday', short: 'Sun' },
+    { id: 2, name: 'Monday', short: 'Mon' },
+    { id: 3, name: 'Tuesday', short: 'Tue' },
+    { id: 4, name: 'Wednesday', short: 'Wed' },
+    { id: 5, name: 'Thursday', short: 'Thu' },
+    { id: 6, name: 'Friday', short: 'Fri' },
+    { id: 7, name: 'Saturday', short: 'Sat' }
+  ];
 
   // Avatar options data
   const avatarOptions = [
@@ -529,6 +623,55 @@ export default function SettingsScreen({ navigation }) {
         )}
       </View>
 
+      {/* Flexible Reminders Section */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>⏰ Flexible Reminders</Text>
+        
+        {flexibleReminder ? (
+          <View style={styles.activeReminderContainer}>
+            <View style={styles.reminderInfo}>
+              <Text style={styles.reminderType}>
+                {flexibleReminder.type.charAt(0).toUpperCase() + flexibleReminder.type.slice(1)} Reminder
+              </Text>
+              <Text style={styles.reminderDetails}>
+                {flexibleReminder.type === 'weekly' 
+                  ? `${flexibleReminder.days.map(id => DAYS_OF_WEEK.find(d => d.id === id)?.short).join(', ')} at ${formatTime(flexibleReminder.time)}`
+                  : `${flexibleReminder.type === 'daily' ? 'Every day' : 'One time'} at ${formatTime(flexibleReminder.time)}`
+                }
+              </Text>
+            </View>
+            <TouchableOpacity 
+              style={styles.cancelReminderButton}
+              onPress={handleCancelFlexibleReminder}
+            >
+              <Text style={styles.cancelReminderText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <TouchableOpacity
+            style={styles.button}
+            onPress={() => setShowReminderConfig(true)}
+          >
+            <Text style={styles.buttonText}>⚙️ Set Flexible Reminder</Text>
+          </TouchableOpacity>
+        )}
+
+        {flexibleReminder && (
+          <TouchableOpacity
+            style={styles.button}
+            onPress={() => setShowReminderConfig(true)}
+          >
+            <Text style={styles.buttonText}>✏️ Edit Reminder</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {/* Notification Demo Section */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>🔔 Test Notifications</Text>
+        <NotificationDemo />
+      </View>
+
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>👨‍👩‍👧‍👦 Account</Text>
 
@@ -640,6 +783,14 @@ export default function SettingsScreen({ navigation }) {
           </View>
         </TouchableWithoutFeedback>
       </Modal>
+
+      {/* Flexible Reminder Config Modal */}
+      <ReminderConfigModal
+        visible={showReminderConfig}
+        onClose={() => setShowReminderConfig(false)}
+        onSave={handleSaveFlexibleReminder}
+        initialConfig={flexibleReminder || { type: 'daily', time: '19:00', days: [2, 3, 4, 5, 6] }}
+      />
 
       {/* Time Picker Modal */}
       <TimePickerModal
@@ -878,5 +1029,39 @@ const styles = StyleSheet.create({
   changeTimeText: {
     fontSize: 12,
     color: colors.textLight,
+  },
+  // Flexible reminder styles
+  activeReminderContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.lightGray,
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 12,
+  },
+  reminderInfo: {
+    flex: 1,
+  },
+  reminderType: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.primary,
+    marginBottom: 4,
+  },
+  reminderDetails: {
+    fontSize: 14,
+    color: colors.textLight,
+  },
+  cancelReminderButton: {
+    backgroundColor: colors.accent,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+  },
+  cancelReminderText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
