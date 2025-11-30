@@ -5,6 +5,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useEffect, useState } from 'react';
 
 // Screens
+import AchievementsScreen from '../screens/AchievementsScreen';
 import ExpenseScreen from '../screens/ExpenseScreen';
 import LoginScreen from '../screens/LoginScreen-simple';
 import RegisterScreen from '../screens/RegisterScreen-simple';
@@ -111,6 +112,16 @@ export default function AppNavigator() {
       <Stack.Screen name="Login" component={LoginScreen} />
       <Stack.Screen name="Register" component={RegisterScreen} />
       <Stack.Screen name="MainTabs" component={MainTabs} />
+      <Stack.Screen 
+        name="Achievements" 
+        component={AchievementsScreen}
+        options={{
+          headerShown: true,
+          headerStyle: { backgroundColor: '#FF6B9D' },
+          headerTintColor: '#FFFFFF',
+          headerTitle: 'Achievements',
+        }}
+      />
     </Stack.Navigator>
   );
 }

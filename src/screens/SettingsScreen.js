@@ -40,9 +40,18 @@ export default function SettingsScreen({ navigation }) {
   const [showAvatarModal, setShowAvatarModal] = useState(false);
   const [showTimePickerModal, setShowTimePickerModal] = useState(false);
   const [showReminderConfig, setShowReminderConfig] = useState(false);
+  const [offlineMode, setOfflineMode] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState({ isOnline: true, pendingOperations: 0 });
+  const [autoDeleteDays, setAutoDeleteDays] = useState('never');
+  const [showDataRetentionModal, setShowDataRetentionModal] = useState(false);
 
   useEffect(() => {
     loadUserSettings();
+    
+    // Load initial connection status
+    const status = syncService.getConnectionStatus();
+    setOfflineMode(status.manualOfflineMode);
+    setConnectionStatus(status);
     
     // Add sync listener for when app comes back online
     const unsubscribe = syncService.addListener((event) => {
@@ -59,6 +68,13 @@ export default function SettingsScreen({ navigation }) {
       if (event.type === 'settings_synced') {
         // Settings were updated from server, reload them
         loadUserSettings();
+      }
+
+      // Update connection status display
+      if (event.type === 'network_change' || event.type === 'manual_mode_change') {
+        const status = syncService.getConnectionStatus();
+        setConnectionStatus(status);
+        setOfflineMode(status.manualOfflineMode);
       }
     });
     
@@ -81,6 +97,10 @@ export default function SettingsScreen({ navigation }) {
       if (storedFlexibleReminder) {
         setFlexibleReminder(JSON.parse(storedFlexibleReminder));
       }
+
+      // Load auto-delete settings
+      const storedAutoDelete = await AsyncStorage.getItem('auto_delete_days');
+      setAutoDeleteDays(storedAutoDelete || 'never');
       
       // Load from AsyncStorage (local auth)
       const user = await AsyncStorage.getItem('currentUser');
@@ -206,6 +226,45 @@ export default function SettingsScreen({ navigation }) {
     { id: 6, name: 'Friday', short: 'Fri' },
     { id: 7, name: 'Saturday', short: 'Sat' }
   ];
+
+  const toggleOfflineMode = async (value) => {
+    setOfflineMode(value);
+    const result = await syncService.setManualOfflineMode(value);
+    
+    if (result.success) {
+      Alert.alert(
+        value ? '📵 Offline Mode Enabled' : '🌐 Online Mode Enabled',
+        value 
+          ? 'Your changes will be saved locally and synced when you go back online.' 
+          : 'Your device is back online! Any pending changes will sync now.',
+        [{ text: 'OK' }]
+      );
+    } else {
+      Alert.alert('Error', 'Failed to change mode. Please try again.');
+      setOfflineMode(!value); // Revert on error
+    }
+  };
+
+  const handleDataRetentionChange = async (days) => {
+    try {
+      await AsyncStorage.setItem('auto_delete_days', days);
+      setAutoDeleteDays(days);
+      setShowDataRetentionModal(false);
+      
+      const message = days === 'never' 
+        ? 'Your data will be kept forever! 📦'
+        : `Data older than ${days} days will be automatically deleted. 🗑️`;
+      
+      Alert.alert('✅ Setting Saved', message, [{ text: 'OK' }]);
+    } catch (error) {
+      Alert.alert('Error', 'Failed to save setting. Please try again.');
+    }
+  };
+
+  const getRetentionDisplayText = () => {
+    if (autoDeleteDays === 'never') return 'Keep Forever';
+    return `Delete after ${autoDeleteDays} days`;
+  };
 
   // Avatar options data
   const avatarOptions = [
@@ -417,17 +476,6 @@ export default function SettingsScreen({ navigation }) {
     }
   };
 
-  const formatTime = (time) => {
-    const [hours, minutes] = time.split(':').map(Number);
-    const date = new Date();
-    date.setHours(hours, minutes, 0, 0);
-    return date.toLocaleTimeString('en-US', {
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true,
-    });
-  };
-
   const handleLogout = () => {
     Alert.alert(
       'Logout 🚪',
@@ -558,6 +606,34 @@ export default function SettingsScreen({ navigation }) {
 
   return (
     <View style={styles.container}>
+      {/* Connection Status Banner */}
+      <View style={[
+        styles.statusBanner,
+        connectionStatus.isOnline ? styles.statusOnline : styles.statusOffline
+      ]}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.statusText}>
+            {connectionStatus.isOnline ? '🌐 Online' : '📵 Offline Mode'} 
+            {connectionStatus.pendingOperations > 0 && 
+              ` • ${connectionStatus.pendingOperations} pending sync${connectionStatus.pendingOperations > 1 ? 's' : ''}`
+            }
+          </Text>
+          {connectionStatus.manualOfflineMode && (
+            <Text style={[styles.statusText, { fontSize: 11, marginTop: 2 }]}>
+              Manual offline mode enabled
+            </Text>
+          )}
+        </View>
+        {connectionStatus.pendingOperations > 0 && connectionStatus.isOnline && (
+          <TouchableOpacity 
+            onPress={() => syncService.manualSync()}
+            style={styles.syncButton}
+          >
+            <Text style={styles.syncButtonText}>Sync Now</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
       <ScrollView style={styles.scrollView}>
       <View style={styles.profileCard}>
         <TouchableOpacity onPress={selectProfilePhoto} style={styles.profilePhotoContainer}>
@@ -672,6 +748,58 @@ export default function SettingsScreen({ navigation }) {
         <NotificationDemo />
       </View>
 
+      {/* Data Management Section */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>🗄️ Data Management</Text>
+        
+        <TouchableOpacity 
+          style={styles.settingRow}
+          onPress={() => setShowDataRetentionModal(true)}
+        >
+          <View style={styles.settingLeft}>
+            <Text style={styles.settingLabel}>Auto-Delete Old Data</Text>
+            <Text style={styles.settingDescription}>
+              {getRetentionDisplayText()}
+            </Text>
+          </View>
+          <Text style={styles.settingArrow}>›</Text>
+        </TouchableOpacity>
+
+        <View style={styles.dataInfoBox}>
+          <Text style={styles.dataInfoText}>
+            💡 Tip: Keeping less data makes the app faster! Old records are automatically cleaned up based on your settings.
+          </Text>
+        </View>
+      </View>
+
+      {/* Offline Mode Section */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>📡 Connection Settings</Text>
+        
+        <View style={styles.settingRow}>
+          <View style={styles.settingLeft}>
+            <Text style={styles.settingLabel}>Offline Mode</Text>
+            <Text style={styles.settingDescription}>
+              Manually work offline for testing or data saving
+            </Text>
+          </View>
+          <Switch
+            value={offlineMode}
+            onValueChange={toggleOfflineMode}
+            trackColor={{ false: colors.textLight, true: colors.accent }}
+            thumbColor={colors.white}
+          />
+        </View>
+
+        {connectionStatus.pendingOperations > 0 && (
+          <View style={styles.pendingSync}>
+            <Text style={styles.pendingSyncText}>
+              ⏳ {connectionStatus.pendingOperations} operation{connectionStatus.pendingOperations > 1 ? 's' : ''} waiting to sync
+            </Text>
+          </View>
+        )}
+      </View>
+
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>👨‍👩‍👧‍👦 Account</Text>
 
@@ -777,6 +905,63 @@ export default function SettingsScreen({ navigation }) {
                   onPress={() => setShowAvatarModal(false)}
                 >
                   <Text style={styles.cancelButtonText}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+
+      {/* Data Retention Modal */}
+      <Modal
+        visible={showDataRetentionModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowDataRetentionModal(false)}
+      >
+        <TouchableWithoutFeedback onPress={() => setShowDataRetentionModal(false)}>
+          <View style={styles.modalOverlay}>
+            <TouchableWithoutFeedback onPress={() => {}}>
+              <View style={styles.retentionModal}>
+                <Text style={styles.retentionTitle}>🗄️ Data Retention</Text>
+                <Text style={styles.retentionSubtitle}>
+                  Choose how long to keep your records
+                </Text>
+
+                {[
+                  { value: '30', label: '30 Days', desc: 'Good for recent tracking' },
+                  { value: '60', label: '2 Months', desc: 'Balance of history & speed' },
+                  { value: '90', label: '3 Months', desc: 'Longer history' },
+                  { value: 'never', label: 'Keep Forever', desc: 'Never auto-delete' }
+                ].map((option) => (
+                  <TouchableOpacity
+                    key={option.value}
+                    style={[
+                      styles.retentionOption,
+                      autoDeleteDays === option.value && styles.retentionOptionSelected
+                    ]}
+                    onPress={() => handleDataRetentionChange(option.value)}
+                  >
+                    <View>
+                      <Text style={[
+                        styles.retentionOptionLabel,
+                        autoDeleteDays === option.value && styles.retentionOptionLabelSelected
+                      ]}>
+                        {option.label}
+                      </Text>
+                      <Text style={styles.retentionOptionDesc}>{option.desc}</Text>
+                    </View>
+                    {autoDeleteDays === option.value && (
+                      <Text style={styles.checkmark}>✓</Text>
+                    )}
+                  </TouchableOpacity>
+                ))}
+
+                <TouchableOpacity
+                  style={styles.modalCloseButton}
+                  onPress={() => setShowDataRetentionModal(false)}
+                >
+                  <Text style={styles.modalCloseText}>Cancel</Text>
                 </TouchableOpacity>
               </View>
             </TouchableWithoutFeedback>
@@ -1062,6 +1247,140 @@ const styles = StyleSheet.create({
   cancelReminderText: {
     color: 'white',
     fontSize: 14,
+    fontWeight: '600',
+  },
+  // Connection status banner
+  statusBanner: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  statusOnline: {
+    backgroundColor: '#4CAF50',
+  },
+  statusOffline: {
+    backgroundColor: '#FF9800',
+  },
+  statusText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  syncButton: {
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.5)',
+  },
+  syncButtonText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  pendingSync: {
+    backgroundColor: '#FFF3CD',
+    padding: 12,
+    borderRadius: 8,
+    borderLeftWidth: 4,
+    borderLeftColor: '#FFC107',
+    marginTop: 12,
+  },
+  pendingSyncText: {
+    color: '#856404',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  settingArrow: {
+    fontSize: 24,
+    color: colors.textLight,
+  },
+  dataInfoBox: {
+    backgroundColor: '#E3F2FD',
+    padding: 12,
+    borderRadius: 8,
+    borderLeftWidth: 4,
+    borderLeftColor: colors.primary,
+    marginTop: 12,
+  },
+  dataInfoText: {
+    color: '#1565C0',
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  retentionModal: {
+    width: '85%',
+    backgroundColor: 'white',
+    borderRadius: 16,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    elevation: 10,
+  },
+  retentionTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: colors.text,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  retentionSubtitle: {
+    fontSize: 14,
+    color: colors.textLight,
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  retentionOption: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    backgroundColor: colors.lightGray,
+    borderRadius: 10,
+    marginBottom: 10,
+  },
+  retentionOptionSelected: {
+    backgroundColor: colors.primary,
+  },
+  retentionOptionLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text,
+    marginBottom: 2,
+  },
+  retentionOptionLabelSelected: {
+    color: 'white',
+  },
+  retentionOptionDesc: {
+    fontSize: 13,
+    color: colors.textLight,
+  },
+  checkmark: {
+    fontSize: 20,
+    color: 'white',
+    fontWeight: 'bold',
+  },
+  modalCloseButton: {
+    backgroundColor: colors.lightGray,
+    paddingVertical: 14,
+    borderRadius: 10,
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  modalCloseText: {
+    color: colors.text,
+    fontSize: 16,
     fontWeight: '600',
   },
 });

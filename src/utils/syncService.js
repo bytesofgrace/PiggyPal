@@ -7,6 +7,7 @@ import { auth, db } from '../config/firebase';
 class SyncService {
   constructor() {
     this.isOnline = true;
+    this.manualOfflineMode = false;
     this.syncQueue = [];
     this.isSyncing = false;
     this.listeners = new Set();
@@ -15,24 +16,85 @@ class SyncService {
     this.initNetworkListener();
     // Load pending operations from storage
     this.loadPendingOperations();
+    // Load manual offline mode setting
+    this.loadOfflineModeSetting();
   }
 
   // Network connectivity management
   initNetworkListener() {
     NetInfo.addEventListener(state => {
       const wasOffline = !this.isOnline;
-      this.isOnline = state.isConnected;
+      // Only update online status if not in manual offline mode
+      if (!this.manualOfflineMode) {
+        this.isOnline = state.isConnected;
+      } else {
+        this.isOnline = false;
+      }
       
       this.notifyListeners({
         type: 'network_change',
-        isOnline: this.isOnline
+        isOnline: this.isOnline,
+        manualMode: this.manualOfflineMode
       });
 
       // If we just came back online, try to sync
-      if (wasOffline && this.isOnline) {
+      if (wasOffline && this.isOnline && !this.manualOfflineMode) {
         this.processSyncQueue();
       }
     });
+  }
+
+  // Load manual offline mode setting
+  async loadOfflineModeSetting() {
+    try {
+      const setting = await AsyncStorage.getItem('manual_offline_mode');
+      this.manualOfflineMode = setting === 'true';
+      if (this.manualOfflineMode) {
+        this.isOnline = false;
+      }
+    } catch (error) {
+      console.error('Error loading offline mode setting:', error);
+    }
+  }
+
+  // Toggle manual offline mode
+  async setManualOfflineMode(enabled) {
+    try {
+      this.manualOfflineMode = enabled;
+      await AsyncStorage.setItem('manual_offline_mode', enabled.toString());
+      
+      if (enabled) {
+        this.isOnline = false;
+      } else {
+        // Check actual network status
+        const state = await NetInfo.fetch();
+        this.isOnline = state.isConnected;
+        // Try to sync if back online
+        if (this.isOnline) {
+          this.processSyncQueue();
+        }
+      }
+      
+      this.notifyListeners({
+        type: 'manual_mode_change',
+        isOnline: this.isOnline,
+        manualMode: this.manualOfflineMode
+      });
+      
+      return { success: true };
+    } catch (error) {
+      console.error('Error setting offline mode:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  // Get current mode status
+  getConnectionStatus() {
+    return {
+      isOnline: this.isOnline,
+      manualOfflineMode: this.manualOfflineMode,
+      pendingOperations: this.syncQueue.length
+    };
   }
 
   // Event listener management
@@ -53,6 +115,45 @@ class SyncService {
 
   // Queue management
   async addToQueue(operation) {
+    // Check for duplicate CREATE operations
+    if (operation.type === 'CREATE') {
+      const isDuplicate = this.syncQueue.some(item => 
+        item.type === 'CREATE' &&
+        item.collection === operation.collection &&
+        item.docId === operation.docId
+      );
+      
+      if (isDuplicate) {
+        console.log('⚠️ Duplicate CREATE operation detected, skipping');
+        // Return existing queue item ID
+        const existing = this.syncQueue.find(item => 
+          item.type === 'CREATE' && item.docId === operation.docId
+        );
+        return existing?.id || null;
+      }
+    }
+    
+    // Check for duplicate UPDATE operations (update existing instead)
+    if (operation.type === 'UPDATE') {
+      const existingIndex = this.syncQueue.findIndex(item => 
+        item.docId === operation.docId &&
+        item.collection === operation.collection &&
+        (item.type === 'UPDATE' || item.type === 'CREATE')
+      );
+      
+      if (existingIndex !== -1) {
+        console.log('⚠️ Updating existing queued operation instead of adding duplicate');
+        // Update the existing queue item with new data
+        this.syncQueue[existingIndex].data = {
+          ...this.syncQueue[existingIndex].data,
+          ...operation.data,
+          updatedAt: Date.now()
+        };
+        await this.savePendingOperations();
+        return this.syncQueue[existingIndex].id;
+      }
+    }
+
     const queueItem = {
       id: Date.now() + Math.random().toString(36),
       ...operation,
@@ -83,11 +184,39 @@ class SyncService {
     try {
       const queueData = await AsyncStorage.getItem('sync_queue');
       if (queueData) {
-        this.syncQueue = JSON.parse(queueData);
+        const parsed = JSON.parse(queueData);
+        
+        // Validate queue structure
+        if (!Array.isArray(parsed)) {
+          console.error('⚠️ Invalid queue structure, resetting');
+          this.syncQueue = [];
+          await this.savePendingOperations();
+          return;
+        }
+        
+        // Validate and sanitize each item
+        this.syncQueue = parsed.filter(item => {
+          const isValid = 
+            item.id && 
+            item.type && 
+            item.timestamp &&
+            ['CREATE', 'UPDATE', 'DELETE'].includes(item.type) &&
+            item.collection &&
+            item.docId &&
+            (item.type === 'DELETE' || item.data !== undefined);
+          
+          if (!isValid) {
+            console.warn('⚠️ Removing invalid queue item:', item);
+          }
+          return isValid;
+        });
+        
+        console.log(`✅ Loaded ${this.syncQueue.length} valid operations from queue`);
       }
     } catch (error) {
       console.error('Error loading sync queue:', error);
       this.syncQueue = [];
+      await this.savePendingOperations(); // Reset corrupted queue
     }
   }
 
@@ -149,15 +278,61 @@ class SyncService {
     }
 
     const { type, collection, docId, data } = operation;
+    const docRef = doc(db, collection, docId);
 
     switch (type) {
       case 'CREATE':
+        // Check if document already exists (prevent duplicates)
+        const existingDoc = await getDoc(docRef);
+        if (existingDoc.exists()) {
+          console.log('⚠️ Document already exists, converting CREATE to UPDATE');
+          // Document exists, merge instead
+          await setDoc(docRef, {
+            ...data,
+            updatedAt: Date.now()
+          }, { merge: true });
+        } else {
+          // Normal create
+          await setDoc(docRef, data);
+        }
+        break;
+        
       case 'UPDATE':
-        await setDoc(doc(db, collection, docId), data, { merge: type === 'UPDATE' });
+        // Fetch current server version for conflict detection
+        const serverDoc = await getDoc(docRef);
+        
+        if (serverDoc.exists()) {
+          const serverData = serverDoc.data();
+          
+          // Conflict detection: Check if server has newer data
+          if (serverData.updatedAt && data.updatedAt && serverData.updatedAt > data.updatedAt) {
+            console.log('⚠️ Conflict detected: Server data is newer, merging...');
+            
+            // Merge strategy: Keep newer values for each field
+            const mergedData = {
+              ...serverData,
+              ...data,
+              updatedAt: Date.now(),
+              conflictResolved: true,
+              lastSyncedAt: Date.now()
+            };
+            
+            await setDoc(docRef, mergedData, { merge: true });
+          } else {
+            // No conflict or client data is newer
+            await setDoc(docRef, {
+              ...data,
+              lastSyncedAt: Date.now()
+            }, { merge: true });
+          }
+        } else {
+          // Document doesn't exist, create it
+          await setDoc(docRef, data);
+        }
         break;
         
       case 'DELETE':
-        await deleteDoc(doc(db, collection, docId));
+        await deleteDoc(docRef);
         break;
         
       default:
@@ -165,16 +340,57 @@ class SyncService {
     }
   }
 
+  // Data validation helper
+  validateExpense(expense) {
+    const errors = [];
+    
+    if (!expense.title || typeof expense.title !== 'string' || expense.title.trim() === '') {
+      errors.push('Title is required and must be a non-empty string');
+    }
+    if (!expense.amount || isNaN(parseFloat(expense.amount)) || parseFloat(expense.amount) <= 0) {
+      errors.push('Valid amount greater than 0 is required');
+    }
+    if (!['spending', 'saving'].includes(expense.type)) {
+      errors.push('Type must be either "spending" or "saving"');
+    }
+    if (!expense.date) {
+      errors.push('Date is required');
+    }
+    
+    return {
+      valid: errors.length === 0,
+      errors
+    };
+  }
+
   // Public API methods
   async saveExpense(expense, user) {
+    // Validate expense data before saving
+    const validation = this.validateExpense(expense);
+    if (!validation.valid) {
+      console.error('❌ Expense validation failed:', validation.errors);
+      return { 
+        success: false, 
+        error: `Validation failed: ${validation.errors.join(', ')}`,
+        validationErrors: validation.errors
+      };
+    }
+
     // Save locally first
     try {
       const existingExpenses = await AsyncStorage.getItem(`expenses_${user}`);
       const expenses = existingExpenses ? JSON.parse(existingExpenses) : [];
       
+      const expenseId = expense.id || Date.now().toString();
+      const updatedExpense = {
+        ...expense,
+        id: expenseId,
+        updatedAt: Date.now()
+      };
+      
       const updatedExpenses = expense.id 
-        ? expenses.map(e => e.id === expense.id ? expense : e)
-        : [...expenses, { ...expense, id: Date.now().toString() }];
+        ? expenses.map(e => e.id === expense.id ? updatedExpense : e)
+        : [...expenses, updatedExpense];
       
       await AsyncStorage.setItem(`expenses_${user}`, JSON.stringify(updatedExpenses));
       
@@ -183,9 +399,9 @@ class SyncService {
         await this.addToQueue({
           type: expense.id ? 'UPDATE' : 'CREATE',
           collection: 'expenses',
-          docId: `${auth.currentUser.uid}_${expense.id || Date.now()}`,
+          docId: `${auth.currentUser.uid}_${expenseId}`,
           data: {
-            ...expense,
+            ...updatedExpense,
             userId: auth.currentUser.uid,
             syncedAt: Date.now()
           }
@@ -340,6 +556,93 @@ class SyncService {
     }
   }
 
+  // Merge expenses with conflict resolution
+  mergeExpenses(localExpenses, serverExpenses) {
+    const merged = new Map();
+    
+    // Add all local expenses
+    localExpenses.forEach(expense => {
+      merged.set(expense.id, expense);
+    });
+    
+    // Merge server expenses (newer timestamp wins)
+    serverExpenses.forEach(serverExpense => {
+      const localExpense = merged.get(serverExpense.id);
+      
+      if (!localExpense) {
+        // New expense from server
+        merged.set(serverExpense.id, serverExpense);
+      } else {
+        // Conflict: Keep newer version based on updatedAt
+        const localTime = localExpense.updatedAt || localExpense.date || 0;
+        const serverTime = serverExpense.updatedAt || serverExpense.date || 0;
+        
+        if (serverTime > localTime) {
+          merged.set(serverExpense.id, serverExpense);
+        }
+        // Otherwise keep local version
+      }
+    });
+    
+    return Array.from(merged.values());
+  }
+
+  // Fetch expenses from server and merge with local data
+  async syncExpensesFromServer(userId) {
+    try {
+      if (!auth.currentUser || !this.isOnline) {
+        return { success: false, error: 'Not authenticated or offline' };
+      }
+
+      console.log('📥 Fetching expenses from server...');
+      
+      // Import query, collection, where, getDocs
+      const { query, collection, where, getDocs } = await import('firebase/firestore');
+      
+      const q = query(
+        collection(db, 'expenses'),
+        where('userId', '==', auth.currentUser.uid)
+      );
+      
+      const snapshot = await getDocs(q);
+      const serverExpenses = [];
+      
+      snapshot.forEach(doc => {
+        serverExpenses.push({ 
+          id: doc.id.split('_')[1] || doc.id, // Remove userId prefix
+          ...doc.data() 
+        });
+      });
+      
+      console.log(`📥 Found ${serverExpenses.length} expenses on server`);
+      
+      // Get local expenses
+      const localData = await AsyncStorage.getItem(`expenses_${userId}`);
+      const localExpenses = localData ? JSON.parse(localData) : [];
+      
+      console.log(`💾 Found ${localExpenses.length} expenses locally`);
+      
+      // Merge with conflict resolution
+      const mergedExpenses = this.mergeExpenses(localExpenses, serverExpenses);
+      
+      console.log(`✅ Merged to ${mergedExpenses.length} total expenses`);
+      
+      // Save merged data locally
+      await AsyncStorage.setItem(`expenses_${userId}`, JSON.stringify(mergedExpenses));
+      
+      this.notifyListeners({
+        type: 'expenses_synced',
+        data: mergedExpenses
+      });
+      
+      return { success: true, data: mergedExpenses };
+      
+    } catch (error) {
+      console.error('Error syncing expenses from server:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
   // Pull settings from server when online
   async syncSettingsFromServer() {
     try {
@@ -389,6 +692,39 @@ class SyncService {
       
     } catch (error) {
       console.error('Error syncing settings from server:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  // Initial sync: Pull all data from server on app startup
+  async performInitialSync(userId) {
+    try {
+      if (!this.isOnline) {
+        console.log('⚠️ Offline, skipping initial sync');
+        return { success: false, error: 'Offline' };
+      }
+
+      console.log('🔄 Starting initial sync from server...');
+      
+      const results = {
+        expenses: await this.syncExpensesFromServer(userId),
+        settings: await this.syncSettingsFromServer()
+      };
+      
+      // Process any pending operations
+      await this.processSyncQueue();
+      
+      console.log('✅ Initial sync complete');
+      
+      this.notifyListeners({
+        type: 'initial_sync_complete',
+        results
+      });
+      
+      return { success: true, results };
+      
+    } catch (error) {
+      console.error('Error during initial sync:', error);
       return { success: false, error: error.message };
     }
   }

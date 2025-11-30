@@ -48,13 +48,41 @@ export default function ExpenseScreen() {
   // No animation values needed
 
   useEffect(() => {
-    loadCurrentUser();
-    loadExpenses();
+    const initializeData = async () => {
+      await loadCurrentUser();
+      await loadExpenses();
+      await loadDraft(); // Load any saved draft
+      await autoDeleteOldExpenses(); // Auto-delete old entries based on settings
+      
+      // Perform initial sync from server
+      const user = await AsyncStorage.getItem('currentUser');
+      if (user) {
+        console.log('🔄 Performing initial sync from server...');
+        const result = await syncService.performInitialSync(user);
+        if (result.success) {
+          console.log('✅ Initial sync successful');
+          // Reload expenses after sync
+          await loadExpenses();
+        } else {
+          console.log('⚠️ Initial sync failed:', result.error);
+        }
+      }
+    };
+    
+    initializeData();
     
     // Set initial random motivational message
     const randomMessage = motivationalMessages[Math.floor(Math.random() * motivationalMessages.length)];
     setHeaderMessage(randomMessage);
   }, []);
+
+  // Auto-save draft whenever form fields change
+  useEffect(() => {
+    // Only save if there's actual content and modal is visible
+    if (modalVisible && (title || amount)) {
+      saveDraft();
+    }
+  }, [title, amount, type, selectedDate, modalVisible]);
 
   // Change message each time screen comes into focus
   useFocusEffect(
@@ -90,6 +118,186 @@ export default function ExpenseScreen() {
     }
   };
 
+  // Save draft to AsyncStorage
+  const saveDraft = async () => {
+    try {
+      const user = await AsyncStorage.getItem('currentUser');
+      if (!user) return;
+
+      const draft = {
+        title,
+        amount,
+        type,
+        selectedDate: selectedDate.toISOString(),
+        editingExpenseId: editingExpense?.id || null,
+        timestamp: Date.now()
+      };
+
+      await AsyncStorage.setItem(`expense_draft_${user}`, JSON.stringify(draft));
+    } catch (error) {
+      console.log('Error saving draft:', error);
+    }
+  };
+
+  // Load draft from AsyncStorage
+  const loadDraft = async () => {
+    try {
+      const user = await AsyncStorage.getItem('currentUser');
+      if (!user) return;
+
+      const draftData = await AsyncStorage.getItem(`expense_draft_${user}`);
+      if (draftData) {
+        const draft = JSON.parse(draftData);
+        
+        // Only restore draft if it's less than 24 hours old
+        const hoursSinceDraft = (Date.now() - draft.timestamp) / (1000 * 60 * 60);
+        if (hoursSinceDraft < 24) {
+          setTitle(draft.title || '');
+          setAmount(draft.amount || '');
+          setType(draft.type || 'spending');
+          setSelectedDate(draft.selectedDate ? new Date(draft.selectedDate) : new Date());
+          
+          // If there was a draft, show alert
+          if (draft.title || draft.amount) {
+            Alert.alert(
+              'Draft Restored',
+              'We found an unsaved entry and restored it for you!',
+              [{ text: 'OK' }]
+            );
+          }
+        } else {
+          // Clear old draft
+          await clearDraft();
+        }
+      }
+    } catch (error) {
+      console.log('Error loading draft:', error);
+    }
+  };
+
+  // Clear draft from AsyncStorage
+  const clearDraft = async () => {
+    try {
+      const user = await AsyncStorage.getItem('currentUser');
+      if (!user) return;
+      await AsyncStorage.removeItem(`expense_draft_${user}`);
+    } catch (error) {
+      console.log('Error clearing draft:', error);
+    }
+  };
+
+  // Auto-delete old expenses based on settings
+  const autoDeleteOldExpenses = async () => {
+    try {
+      const user = await AsyncStorage.getItem('currentUser');
+      if (!user) return;
+
+      const autoDeleteDays = await AsyncStorage.getItem('auto_delete_days');
+      if (!autoDeleteDays || autoDeleteDays === 'never') return;
+
+      const daysToKeep = parseInt(autoDeleteDays);
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
+
+      const expensesData = await AsyncStorage.getItem(`expenses_${user}`);
+      if (expensesData) {
+        const expensesList = JSON.parse(expensesData);
+        const filteredExpenses = expensesList.filter(expense => {
+          const expenseDate = new Date(expense.date);
+          return expenseDate >= cutoffDate;
+        });
+
+        if (filteredExpenses.length !== expensesList.length) {
+          await AsyncStorage.setItem(`expenses_${user}`, JSON.stringify(filteredExpenses));
+          setExpenses(filteredExpenses);
+          console.log(`Auto-deleted ${expensesList.length - filteredExpenses.length} old expenses`);
+        }
+      }
+    } catch (error) {
+      console.log('Error auto-deleting old expenses:', error);
+    }
+  };
+
+  // Bulk delete all expenses
+  const handleBulkDelete = () => {
+    Alert.alert(
+      '🗑️ Delete All Data?',
+      'This will permanently delete ALL your savings and spending records. This action cannot be undone!',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Export First',
+          onPress: () => exportDataBeforeDelete(),
+          style: 'default'
+        },
+        {
+          text: 'Delete All',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const user = await AsyncStorage.getItem('currentUser');
+              if (!user) return;
+
+              await AsyncStorage.setItem(`expenses_${user}`, JSON.stringify([]));
+              setExpenses([]);
+              
+              Alert.alert(
+                '✅ All Clear!',
+                'All your expense records have been deleted.',
+                [{ text: 'OK' }]
+              );
+            } catch (error) {
+              Alert.alert('Error', 'Failed to delete records. Please try again.');
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  // Export data as text (simple format for kids)
+  const exportDataBeforeDelete = () => {
+    if (expenses.length === 0) {
+      Alert.alert('No Data', 'You don\'t have any data to export!');
+      return;
+    }
+
+    const totalSavings = expenses
+      .filter(e => e.type === 'saving')
+      .reduce((sum, e) => sum + e.amount, 0);
+    const totalSpending = expenses
+      .filter(e => e.type === 'spending')
+      .reduce((sum, e) => sum + e.amount, 0);
+
+    const summary = `📊 PiggyPal Summary\n\n` +
+      `💰 Total Savings: $${totalSavings.toFixed(2)}\n` +
+      `💸 Total Spending: $${totalSpending.toFixed(2)}\n` +
+      `📝 Total Records: ${expenses.length}\n\n` +
+      `Recent Entries:\n` +
+      expenses.slice(0, 5).map(e => 
+        `${e.type === 'saving' ? '💰' : '💸'} ${e.title}: $${e.amount}`
+      ).join('\n');
+
+    Alert.alert(
+      '📤 Your Data Summary',
+      summary,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete All Now',
+          style: 'destructive',
+          onPress: async () => {
+            const user = await AsyncStorage.getItem('currentUser');
+            if (!user) return;
+            await AsyncStorage.setItem(`expenses_${user}`, JSON.stringify([]));
+            setExpenses([]);
+            Alert.alert('✅ Deleted!', 'All records have been deleted.');
+          }
+        }
+      ]
+    );
+  };
+
   // No animation functions needed
 
   const openAddModal = () => {
@@ -99,6 +307,43 @@ export default function ExpenseScreen() {
     setType('spending');
     setSelectedDate(new Date());
     setModalVisible(true);
+  };
+
+  const handleCloseModal = () => {
+    // If there's unsaved data, ask user
+    if (title || amount) {
+      Alert.alert(
+        'Unsaved Changes',
+        'Do you want to save this as a draft?',
+        [
+          {
+            text: 'Discard',
+            style: 'destructive',
+            onPress: async () => {
+              await clearDraft();
+              setTitle('');
+              setAmount('');
+              setType('spending');
+              setEditingExpense(null);
+              setModalVisible(false);
+            }
+          },
+          {
+            text: 'Keep Draft',
+            onPress: () => {
+              setModalVisible(false);
+              // Draft is already saved via useEffect
+            }
+          },
+          {
+            text: 'Cancel',
+            style: 'cancel'
+          }
+        ]
+      );
+    } else {
+      setModalVisible(false);
+    }
   };
 
   const openEditModal = (expense) => {
@@ -151,14 +396,24 @@ export default function ExpenseScreen() {
           setTimeout(() => setShowConfetti(false), 4000);
         }
         
-        // Clear form
+        // Clear form and draft
         setTitle('');
         setAmount('');
         setType('spending');
         setEditingExpense(null);
+        await clearDraft(); // Clear draft after successful save
         
       } else {
-        Alert.alert('Error', `Failed to save: ${result.error}`);
+        // Show detailed validation errors if available
+        if (result.validationErrors && result.validationErrors.length > 0) {
+          Alert.alert(
+            'Validation Error',
+            result.validationErrors.join('\n'),
+            [{ text: 'OK' }]
+          );
+        } else {
+          Alert.alert('Error', `Failed to save: ${result.error}`);
+        }
       }
       
     } catch (error) {
@@ -245,7 +500,17 @@ export default function ExpenseScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>{headerMessage}</Text>
+        <View style={styles.headerTop}>
+          <Text style={styles.headerTitle}>{headerMessage}</Text>
+          {expenses.length > 0 && (
+            <TouchableOpacity 
+              style={styles.bulkDeleteButton}
+              onPress={handleBulkDelete}
+            >
+              <Text style={styles.bulkDeleteText}>🗑️</Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
 
       {expenses.length === 0 ? (
@@ -297,7 +562,7 @@ export default function ExpenseScreen() {
         animationType="slide"
         transparent={true}
         visible={modalVisible}
-        onRequestClose={() => setModalVisible(false)}
+        onRequestClose={handleCloseModal}
       >
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
           <View style={styles.modalOverlay}>
@@ -390,7 +655,7 @@ export default function ExpenseScreen() {
             <View style={styles.modalButtons}>
               <TouchableOpacity
                 style={styles.cancelButton}
-                onPress={() => setModalVisible(false)}
+                onPress={handleCloseModal}
               >
                 <Text style={styles.cancelButtonText}>Cancel</Text>
               </TouchableOpacity>
@@ -454,13 +719,29 @@ const styles = StyleSheet.create({
   header: {
     padding: 20,
     paddingTop: 10,
+    paddingHorizontal: 20,
+  },
+  headerTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
   },
   headerTitle: {
     fontSize: 18,
     fontWeight: 'bold',
     color: colors.text,
-    textAlign: 'center',
+    flex: 1,
+  },
+  bulkDeleteButton: {
+    backgroundColor: colors.accent,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bulkDeleteText: {
+    fontSize: 20,
   },
   listContainer: {
     padding: 20,

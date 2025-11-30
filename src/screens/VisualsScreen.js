@@ -14,12 +14,13 @@ import {
   View
 } from 'react-native';
 import { BarChart, PieChart } from 'react-native-chart-kit';
+import achievementService from '../utils/achievementService';
 import { colors, motivationalMessages } from '../utils/colors';
 import syncService from '../utils/syncService';
 
 const screenWidth = Dimensions.get('window').width;
 
-export default function VisualsScreen() {
+export default function VisualsScreen({ navigation }) {
   const [totalSaving, setTotalSaving] = useState(0);
   const [totalSpending, setTotalSpending] = useState(0);
   const [motivation, setMotivation] = useState('');
@@ -157,6 +158,38 @@ export default function VisualsScreen() {
 
     setTotalSaving(savingSum);
     setTotalSpending(spendingSum);
+
+    // Check and log goal achievements
+    checkGoalAchievements(savingSum);
+  };
+
+  const checkGoalAchievements = async (currentSavings) => {
+    try {
+      const user = await AsyncStorage.getItem('currentUser');
+      if (!user) return;
+
+      // Check weekly goal
+      if (weeklyGoal > 0) {
+        await achievementService.checkAndLogGoalAchievement(
+          'weekly',
+          weeklyGoal,
+          currentSavings,
+          user
+        );
+      }
+
+      // Check monthly goal
+      if (monthlyGoal > 0) {
+        await achievementService.checkAndLogGoalAchievement(
+          'monthly',
+          monthlyGoal,
+          currentSavings,
+          user
+        );
+      }
+    } catch (error) {
+      console.log('Error checking goal achievements:', error);
+    }
   };
 
   const getYearlyData = () => {
@@ -467,6 +500,14 @@ export default function VisualsScreen() {
             <Text style={styles.motivationText}>Tap to set your savings goals!</Text>
           </TouchableOpacity>
         )}
+
+        {/* View Achievements Button */}
+        <TouchableOpacity 
+          style={styles.achievementsButton}
+          onPress={() => navigation.navigate('Achievements')}
+        >
+          <Text style={styles.achievementsButtonText}>🏆 View Achievement History</Text>
+        </TouchableOpacity>
       </View>
 
       <View style={styles.summaryCards}>
@@ -1149,5 +1190,21 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: 'white',
+  },
+  achievementsButton: {
+    backgroundColor: '#FFF8E1',
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginTop: 15,
+    marginHorizontal: 20,
+    borderWidth: 2,
+    borderColor: '#FFD54F',
+  },
+  achievementsButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#F57F17',
   },
 });
