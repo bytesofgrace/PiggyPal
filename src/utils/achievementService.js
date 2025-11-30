@@ -12,6 +12,7 @@ class AchievementService {
         goalAmount: goal,
         actualAmount: actualAmount,
         achievedAt: new Date().toISOString(),
+        achievedAtMs: Date.now(),
         userId: user
       };
 

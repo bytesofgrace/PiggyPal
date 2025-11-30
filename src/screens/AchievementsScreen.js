@@ -38,8 +38,24 @@ export default function AchievementsScreen({ navigation }) {
     // Helper to get a date with time cleared (local date only)
     const stripTime = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
 
+    // Robust parser for achievedAt values stored as ISO string, numeric string, or ms number
+    const parseDate = (value) => {
+      if (!value) return new Date(0);
+      if (typeof value === 'number') return new Date(value);
+      if (typeof value === 'string') {
+        // numeric string (ms or seconds)
+        if (/^\d+$/.test(value)) {
+          const asNum = Number(value);
+          // if it's a seconds timestamp (10 digits), convert to ms
+          return value.length === 10 ? new Date(asNum * 1000) : new Date(asNum);
+        }
+        return new Date(value);
+      }
+      return new Date(value);
+    };
+
     achievements.forEach(achievement => {
-      const date = new Date(achievement.achievedAt);
+      const date = parseDate(achievement.achievedAt || achievement.achievedAtMs);
       // Compute difference in whole local days between now and the achievement date
       const diffDays = Math.floor((stripTime(now) - stripTime(date)) / (1000 * 60 * 60 * 24));
 
