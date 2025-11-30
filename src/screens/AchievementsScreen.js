@@ -35,10 +35,13 @@ export default function AchievementsScreen({ navigation }) {
       earlier: []
     };
 
+    // Helper to get a date with time cleared (local date only)
+    const stripTime = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+
     achievements.forEach(achievement => {
       const date = new Date(achievement.achievedAt);
-      const diffTime = now - date;
-      const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+      // Compute difference in whole local days between now and the achievement date
+      const diffDays = Math.floor((stripTime(now) - stripTime(date)) / (1000 * 60 * 60 * 24));
 
       // Get week numbers for comparison
       const currentWeekStart = new Date(now);
@@ -48,8 +51,7 @@ export default function AchievementsScreen({ navigation }) {
       const lastWeekStart = new Date(currentWeekStart);
       lastWeekStart.setDate(currentWeekStart.getDate() - 7);
 
-      const achievementDate = new Date(date);
-      achievementDate.setHours(0, 0, 0, 0);
+      const achievementDate = stripTime(date);
 
       if (diffDays === 0) {
         groups.today.push(achievement);
@@ -169,8 +171,9 @@ export default function AchievementsScreen({ navigation }) {
   const formatDate = (dateString) => {
     const date = new Date(dateString);
     const now = new Date();
-    const diffTime = Math.abs(now - date);
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    // Use local-date based day difference to match grouping logic
+    const stripTime = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    const diffDays = Math.floor((stripTime(now) - stripTime(date)) / (1000 * 60 * 60 * 24));
 
     if (diffDays === 0) return 'Today';
     if (diffDays === 1) return 'Yesterday';
