@@ -7,11 +7,13 @@ import { useEffect, useState } from 'react';
 import {
     Alert,
     FlatList,
+    Keyboard,
     Modal,
     ScrollView,
     StyleSheet,
     Switch,
     Text,
+    TextInput,
     TouchableOpacity,
     TouchableWithoutFeedback,
     View
@@ -44,6 +46,19 @@ export default function SettingsScreen({ navigation }) {
   const [connectionStatus, setConnectionStatus] = useState({ isOnline: true, pendingOperations: 0 });
   const [autoDeleteDays, setAutoDeleteDays] = useState('never');
   const [showDataRetentionModal, setShowDataRetentionModal] = useState(false);
+  const [showEditProfileModal, setShowEditProfileModal] = useState(false);
+  const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
+  
+  // Profile fields
+  const [profileName, setProfileName] = useState('');
+  const [profileDob, setProfileDob] = useState('');
+  const [profileHobby, setProfileHobby] = useState('');
+  const [profileDreamJob, setProfileDreamJob] = useState('');
+  
+  // Password fields
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
 
   useEffect(() => {
     loadUserSettings();
@@ -140,6 +155,116 @@ export default function SettingsScreen({ navigation }) {
     } catch (error) {
       console.error('Error updating setting:', error);
       Alert.alert('Settings Error', 'Failed to save setting. Please try again.');
+    }
+  };
+
+  const openEditProfile = async () => {
+    // Load existing profile data
+    const user = await AsyncStorage.getItem('currentUser');
+    if (user) {
+      const userDataString = await AsyncStorage.getItem(`user_${user}`);
+      if (userDataString) {
+        const userData = JSON.parse(userDataString);
+        setProfileName(userData.name || '');
+        setProfileDob(userData.dob || '');
+        setProfileHobby(userData.hobby || '');
+        setProfileDreamJob(userData.dreamJob || '');
+      }
+    }
+    setShowEditProfileModal(true);
+  };
+
+  const handleSaveProfile = async () => {
+    try {
+      const user = await AsyncStorage.getItem('currentUser');
+      if (!user) {
+        Alert.alert('Error', 'User not found');
+        return;
+      }
+
+      const userDataString = await AsyncStorage.getItem(`user_${user}`);
+      const userData = JSON.parse(userDataString);
+      
+      const updatedUserData = {
+        ...userData,
+        name: profileName,
+        dob: profileDob,
+        hobby: profileHobby,
+        dreamJob: profileDreamJob,
+        updatedAt: new Date().toISOString()
+      };
+
+      await AsyncStorage.setItem(`user_${user}`, JSON.stringify(updatedUserData));
+      await AsyncStorage.setItem('currentUserName', profileName);
+      setUserName(profileName);
+      
+      setShowEditProfileModal(false);
+      Alert.alert('Success!', 'Your profile has been updated! ✨');
+    } catch (error) {
+      Alert.alert('Error', 'Failed to update profile. Please try again.');
+    }
+  };
+
+  const openChangePassword = () => {
+    setCurrentPassword('');
+    setNewPassword('');
+    setConfirmNewPassword('');
+    setShowChangePasswordModal(true);
+  };
+
+  const handleChangePassword = async () => {
+    if (!currentPassword || !newPassword || !confirmNewPassword) {
+      Alert.alert('Error', 'Please fill in all fields');
+      return;
+    }
+
+    if (newPassword !== confirmNewPassword) {
+      Alert.alert('Error', 'New passwords do not match');
+      return;
+    }
+
+    if (newPassword.length < 6) {
+      Alert.alert('Error', 'Password must be at least 6 characters');
+      return;
+    }
+
+    try {
+      const user = await AsyncStorage.getItem('currentUser');
+      if (!user) {
+        Alert.alert('Error', 'User not found');
+        return;
+      }
+
+      const userDataString = await AsyncStorage.getItem(`user_${user}`);
+      const userData = JSON.parse(userDataString);
+
+      // Trim whitespace from passwords for comparison
+      const storedPassword = userData.password.trim();
+      const enteredPassword = currentPassword.trim();
+
+      if (storedPassword !== enteredPassword) {
+        Alert.alert(
+          'Error', 
+          `Current password is incorrect.\n\nEntered: "${enteredPassword}"\nStored: "${storedPassword}"`
+        );
+        return;
+      }
+
+      userData.password = newPassword;
+      userData.mustChangePassword = false;
+      userData.updatedAt = new Date().toISOString();
+
+      await AsyncStorage.setItem(`user_${user}`, JSON.stringify(userData));
+      
+      // Clear password fields
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmNewPassword('');
+      
+      setShowChangePasswordModal(false);
+      Alert.alert('Success!', 'Your password has been changed! 🔒');
+    } catch (error) {
+      Alert.alert('Error', `Failed to change password: ${error.message}`);
     }
   };
 
@@ -786,7 +911,7 @@ export default function SettingsScreen({ navigation }) {
           <Switch
             value={offlineMode}
             onValueChange={toggleOfflineMode}
-            trackColor={{ false: colors.textLight, true: colors.accent }}
+            trackColor={{ false: colors.textLight, true: colors.primary }}
             thumbColor={colors.white}
           />
         </View>
@@ -805,16 +930,14 @@ export default function SettingsScreen({ navigation }) {
 
         <TouchableOpacity
           style={styles.button}
-          onPress={() => Alert.alert('Coming Soon', 'Profile editing coming soon! ✨')}
+          onPress={openEditProfile}
         >
           <Text style={styles.buttonText}>✏️ Edit Profile</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
           style={styles.button}
-          onPress={() =>
-            Alert.alert('Coming Soon', 'Password change coming soon! 🔒')
-          }
+          onPress={openChangePassword}
         >
           <Text style={styles.buttonText}>🔒 Change Password</Text>
         </TouchableOpacity>
@@ -984,6 +1107,127 @@ export default function SettingsScreen({ navigation }) {
         onTimeChange={handleTimeChange}
         onClose={() => setShowTimePickerModal(false)}
       />
+
+      {/* Edit Profile Modal */}
+      <Modal
+        visible={showEditProfileModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowEditProfileModal(false)}
+      >
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+          <View style={styles.modalOverlay}>
+            <View style={styles.profileModalContent}>
+              <Text style={styles.profileModalTitle}>✏️ Edit Profile</Text>
+              
+              <TextInput
+                style={styles.profileInput}
+                placeholder="Name / Nickname"
+                value={profileName}
+                onChangeText={setProfileName}
+                placeholderTextColor="#9CA3AF"
+              />
+              
+              <TextInput
+                style={styles.profileInput}
+                placeholder="Date of Birth (e.g., Jan 1, 2010)"
+                value={profileDob}
+                onChangeText={setProfileDob}
+                placeholderTextColor="#9CA3AF"
+              />
+              
+              <TextInput
+                style={styles.profileInput}
+                placeholder="Hobby (e.g., Drawing, Soccer)"
+                value={profileHobby}
+                onChangeText={setProfileHobby}
+                placeholderTextColor="#9CA3AF"
+              />
+              
+              <TextInput
+                style={styles.profileInput}
+                placeholder="Dream Job (e.g., Astronaut, Teacher)"
+                value={profileDreamJob}
+                onChangeText={setProfileDreamJob}
+                placeholderTextColor="#9CA3AF"
+              />
+              
+              <View style={styles.profileModalButtons}>
+                <TouchableOpacity 
+                  style={[styles.profileModalButton, styles.cancelButton]}
+                  onPress={() => setShowEditProfileModal(false)}
+                >
+                  <Text style={styles.cancelButtonText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.profileModalButton, styles.saveButton]}
+                  onPress={handleSaveProfile}
+                >
+                  <Text style={styles.saveButtonText}>Save</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+
+      {/* Change Password Modal */}
+      <Modal
+        visible={showChangePasswordModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowChangePasswordModal(false)}
+      >
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+          <View style={styles.modalOverlay}>
+            <View style={styles.profileModalContent}>
+              <Text style={styles.profileModalTitle}>🔒 Change Password</Text>
+              
+              <TextInput
+                style={styles.profileInput}
+                placeholder="Current Password"
+                value={currentPassword}
+                onChangeText={setCurrentPassword}
+                secureTextEntry
+                placeholderTextColor="#9CA3AF"
+              />
+              
+              <TextInput
+                style={styles.profileInput}
+                placeholder="New Password"
+                value={newPassword}
+                onChangeText={setNewPassword}
+                secureTextEntry
+                placeholderTextColor="#9CA3AF"
+              />
+              
+              <TextInput
+                style={styles.profileInput}
+                placeholder="Confirm New Password"
+                value={confirmNewPassword}
+                onChangeText={setConfirmNewPassword}
+                secureTextEntry
+                placeholderTextColor="#9CA3AF"
+              />
+              
+              <View style={styles.profileModalButtons}>
+                <TouchableOpacity 
+                  style={[styles.profileModalButton, styles.cancelButton]}
+                  onPress={() => setShowChangePasswordModal(false)}
+                >
+                  <Text style={styles.cancelButtonText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.profileModalButton, styles.saveButton]}
+                  onPress={handleChangePassword}
+                >
+                  <Text style={styles.saveButtonText}>Change</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
     </View>
   );
 }
@@ -1220,10 +1464,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: colors.lightGray,
+    backgroundColor: colors.white,
     padding: 16,
     borderRadius: 12,
     marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   reminderInfo: {
     flex: 1,
@@ -1239,7 +1488,7 @@ const styles = StyleSheet.create({
     color: colors.textLight,
   },
   cancelReminderButton: {
-    backgroundColor: colors.accent,
+    backgroundColor: colors.primary,
     paddingVertical: 8,
     paddingHorizontal: 16,
     borderRadius: 8,
@@ -1382,5 +1631,56 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 16,
     fontWeight: '600',
+  },
+  profileModalContent: {
+    backgroundColor: 'white',
+    borderRadius: 20,
+    padding: 25,
+    width: '85%',
+    maxHeight: '80%',
+  },
+  profileModalTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: colors.primary,
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  profileInput: {
+    backgroundColor: colors.background,
+    borderRadius: 12,
+    padding: 15,
+    fontSize: 16,
+    marginBottom: 15,
+    borderWidth: 2,
+    borderColor: colors.primary,
+  },
+  profileModalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 10,
+  },
+  profileModalButton: {
+    flex: 1,
+    padding: 15,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginHorizontal: 5,
+  },
+  cancelButton: {
+    backgroundColor: colors.textLight,
+  },
+  cancelButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  saveButton: {
+    backgroundColor: colors.primary,
+  },
+  saveButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 });

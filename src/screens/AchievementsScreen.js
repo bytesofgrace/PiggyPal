@@ -13,7 +13,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import achievementService from '../utils/achievementService';
 import { colors } from '../utils/colors';
 
-export default function AchievementsScreen() {
+export default function AchievementsScreen({ navigation }) {
   const [sections, setSections] = useState([]);
   const [stats, setStats] = useState({ total: 0, weekly: 0, monthly: 0, totalSaved: 0 });
   const [user, setUser] = useState(null);
@@ -204,6 +204,12 @@ export default function AchievementsScreen() {
     <View style={styles.container}>
       {/* Header Stats */}
       <View style={styles.header}>
+        <TouchableOpacity 
+          style={styles.backButton}
+          onPress={() => navigation.goBack()}
+        >
+          <Text style={styles.backButtonText}>←</Text>
+        </TouchableOpacity>
         <Text style={styles.headerTitle}>🏆 Achievements</Text>
         <View style={styles.statsContainer}>
           <View style={styles.statBox}>
@@ -277,12 +283,24 @@ const styles = StyleSheet.create({
   },
   header: {
     backgroundColor: colors.primary,
-    paddingTop: 60,
+    paddingTop: 120,
     paddingBottom: 20,
     paddingHorizontal: 20,
   },
+  backButton: {
+    position: 'absolute',
+    top: 60,
+    left: 20,
+    zIndex: 10,
+    padding: 5,
+  },
+  backButtonText: {
+    color: 'white',
+    fontSize: 32,
+    fontWeight: 'bold',
+  },
   headerTitle: {
-    fontSize: 28,
+    fontSize: 20,
     fontWeight: 'bold',
     color: 'white',
     textAlign: 'center',

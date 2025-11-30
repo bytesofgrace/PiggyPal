@@ -447,3 +447,20 @@ class NotificationService {
 // Export singleton instance
 export const notificationService = new NotificationService();
 export default notificationService;
+
+// Export helper functions for external use
+export const getRandomMotivationalMessage = () => {
+  return notificationService.getRandomMotivationalMessage();
+};
+
+export const demonstrateNotification = async (title, body, subtitle) => {
+  return notificationService.demonstrateNotification(title, body, subtitle);
+};
+
+export const scheduleFlexibleReminder = async (reminderConfig) => {
+  return notificationService.scheduleFlexibleReminder(reminderConfig);
+};
+
+export const cancelFlexibleReminder = async (type) => {
+  return notificationService.cancelFlexibleReminder(type);
+};

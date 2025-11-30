@@ -1,0 +1,111 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function to check if user is authenticated
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    // Helper function to check if user is accessing their own data
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+    
+    // ============================================
+    // EXPENSES COLLECTION
+    // ============================================
+    // Document ID format: {userId}_{expenseId}
+    match /expenses/{expenseDoc} {
+      // Extract userId from document ID (format: userId_expenseId)
+      function getExpenseUserId() {
+        return expenseDoc.split('_')[0];
+      }
+      
+      // Allow read if user owns the expense
+      allow read: if isSignedIn() && 
+                     request.auth.uid == getExpenseUserId();
+      
+      // Allow create if:
+      // - User is authenticated
+      // - Document ID starts with user's UID
+      // - Document data contains correct userId
+      allow create: if isSignedIn() && 
+                       expenseDoc.matches(request.auth.uid + '_.*') &&
+                       request.resource.data.userId == request.auth.uid;
+      
+      // Allow update if user owns the expense
+      // AND userId field is not changed
+      allow update: if isSignedIn() && 
+                       request.auth.uid == getExpenseUserId() &&
+                       request.resource.data.userId == request.auth.uid;
+      
+      // Allow delete if user owns the expense
+      allow delete: if isSignedIn() && 
+                       request.auth.uid == getExpenseUserId();
+    }
+    
+    // ============================================
+    // USERS COLLECTION
+    // ============================================
+    // Document ID format: {userId}
+    match /users/{userId} {
+      // Allow read only own profile
+      allow read: if isOwner(userId);
+      
+      // Allow create only own profile
+      allow create: if isOwner(userId);
+      
+      // Allow update only own profile
+      allow update: if isOwner(userId);
+      
+      // Prevent deletion of user profiles
+      // (use Firebase Admin SDK or console for user deletion)
+      allow delete: if false;
+    }
+    
+    // ============================================
+    // ACHIEVEMENTS COLLECTION (Future Implementation)
+    // ============================================
+    // Document ID format: {userId}_{achievementId}
+    match /achievements/{achievementDoc} {
+      // Extract userId from document ID
+      function getAchievementUserId() {
+        return achievementDoc.split('_')[0];
+      }
+      
+      // Allow read only own achievements
+      allow read: if isSignedIn() && 
+                     request.auth.uid == getAchievementUserId();
+      
+      // Allow create if document belongs to user
+      allow create: if isSignedIn() && 
+                       achievementDoc.matches(request.auth.uid + '_.*') &&
+                       request.resource.data.userId == request.auth.uid;
+      
+      // Prevent updates (achievements are immutable once created)
+      allow update: if false;
+      
+      // Allow delete only own achievements
+      allow delete: if isSignedIn() && 
+                       request.auth.uid == getAchievementUserId();
+    }
+    
+    // ============================================
+    // SYNC QUEUE (Future Implementation)
+    // ============================================
+    match /syncQueue/{userId} {
+      // Allow read/write only own sync queue
+      allow read, write: if isOwner(userId);
+    }
+    
+    // ============================================
+    // DEFAULT: DENY ALL OTHER COLLECTIONS
+    // ============================================
+    // Explicitly deny access to any other collections
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

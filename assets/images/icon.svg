@@ -3,6 +3,6 @@
   <!-- Rounded square background with 22.37% border radius -->
   <rect x="0" y="0" width="1024" height="1024" rx="229" fill="#FF6B9D"/>
   
-  <!-- Pig emoji - centered -->
+  <!-- Pink pig emoji - centered -->
   <text x="512" y="680" font-size="600" text-anchor="middle" font-family="Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji, Android Emoji, sans-serif">🐷</text>
 </svg>

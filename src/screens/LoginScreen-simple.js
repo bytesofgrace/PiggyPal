@@ -3,12 +3,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useState } from 'react';
 import {
   Alert,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   View,
 } from 'react-native';
 
@@ -45,16 +47,76 @@ export default function LoginScreen({ navigation }) {
     }
   };
 
+  const handleForgotPassword = () => {
+    Alert.prompt(
+      '🔐 Forgot Password?',
+      'Enter your registered email address:',
+      async (inputEmail) => {
+        if (!inputEmail) {
+          Alert.alert('Error', 'Please enter your email address');
+          return;
+        }
+
+        try {
+          const userDataString = await AsyncStorage.getItem(`user_${inputEmail}`);
+          
+          if (!userDataString) {
+            Alert.alert(
+              'Email Not Found',
+              'No account found with this email address. Please check your email or create a new account.',
+              [{ text: 'OK' }]
+            );
+            return;
+          }
+
+          const userData = JSON.parse(userDataString);
+          
+          // Generate a temporary password
+          const tempPassword = `Temp${Math.floor(Math.random() * 10000)}!`;
+          
+          // Update user's password to temporary password
+          userData.password = tempPassword;
+          userData.mustChangePassword = true;
+          userData.updatedAt = new Date().toISOString();
+          
+          await AsyncStorage.setItem(`user_${inputEmail}`, JSON.stringify(userData));
+          
+          // Show the temporary password
+          Alert.alert(
+            'Password Reset',
+            `Your temporary password is: ${tempPassword}\n\nPlease use this to login, then change your password in Settings.`,
+            [
+              {
+                text: 'Copy Password',
+                onPress: () => {
+                  setPassword(tempPassword);
+                }
+              },
+              { text: 'OK' }
+            ]
+          );
+          
+        } catch (error) {
+          Alert.alert('Error', 'Failed to reset password. Please try again.');
+        }
+      },
+      'plain-text',
+      '',
+      'email-address'
+    );
+  };
+
   return (
-    <KeyboardAvoidingView 
-      style={styles.container} 
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <View style={styles.formContainer}>
-        <View style={styles.headerContainer}>
-          <Text style={styles.piggyEmoji}>🐷</Text>
-        </View>
-        <Text style={styles.title}>Welcome to Piggy Pal!</Text>
+    <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+      <KeyboardAvoidingView 
+        style={styles.container} 
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <View style={styles.formContainer}>
+          <View style={styles.headerContainer}>
+            <Text style={styles.piggyEmoji}>🐷</Text>
+          </View>
+          <Text style={styles.title}>Welcome to Piggy Pal!</Text>
         
         <TextInput
           style={styles.input}
@@ -63,6 +125,7 @@ export default function LoginScreen({ navigation }) {
           onChangeText={setEmail}
           keyboardType="email-address"
           autoCapitalize="none"
+          placeholderTextColor="#9CA3AF"
         />
         
         <TextInput
@@ -71,10 +134,18 @@ export default function LoginScreen({ navigation }) {
           value={password}
           onChangeText={setPassword}
           secureTextEntry
+          placeholderTextColor="#9CA3AF"
         />
         
         <TouchableOpacity style={styles.button} onPress={handleLogin}>
           <Text style={styles.buttonText}>Login</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={styles.forgotPasswordButton} 
+          onPress={handleForgotPassword}
+        >
+          <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
         </TouchableOpacity>
         
         <TouchableOpacity 
@@ -85,6 +156,7 @@ export default function LoginScreen({ navigation }) {
         </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
+    </TouchableWithoutFeedback>
   );
 }
 
@@ -133,6 +205,15 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontSize: 18,
     fontWeight: 'bold',
+  },
+  forgotPasswordButton: {
+    marginTop: 15,
+    alignItems: 'center',
+  },
+  forgotPasswordText: {
+    color: 'white',
+    fontSize: 14,
+    textDecorationLine: 'underline',
   },
   linkButton: {
     marginTop: 20,

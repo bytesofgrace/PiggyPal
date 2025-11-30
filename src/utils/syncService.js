@@ -388,16 +388,25 @@ class SyncService {
         updatedAt: Date.now()
       };
       
-      const updatedExpenses = expense.id 
-        ? expenses.map(e => e.id === expense.id ? updatedExpense : e)
-        : [...expenses, updatedExpense];
+      // Check if this expense already exists in the array
+      const existingIndex = expenses.findIndex(e => e.id === expenseId);
+      let updatedExpenses;
+      
+      if (existingIndex !== -1) {
+        // Update existing expense
+        updatedExpenses = [...expenses];
+        updatedExpenses[existingIndex] = updatedExpense;
+      } else {
+        // Add new expense
+        updatedExpenses = [...expenses, updatedExpense];
+      }
       
       await AsyncStorage.setItem(`expenses_${user}`, JSON.stringify(updatedExpenses));
       
       // Queue for sync
       if (auth.currentUser) {
         await this.addToQueue({
-          type: expense.id ? 'UPDATE' : 'CREATE',
+          type: existingIndex !== -1 ? 'UPDATE' : 'CREATE',
           collection: 'expenses',
           docId: `${auth.currentUser.uid}_${expenseId}`,
           data: {

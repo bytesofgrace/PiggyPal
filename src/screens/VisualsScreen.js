@@ -117,6 +117,32 @@ export default function VisualsScreen({ navigation }) {
     }, [])
   );
 
+  // Poll for expense updates (from auto-delete or other operations)
+  useEffect(() => {
+    let lastUpdateTime = null;
+    
+    const checkForUpdates = async () => {
+      try {
+        const updateTime = await AsyncStorage.getItem('expenses_updated');
+        if (updateTime && updateTime !== lastUpdateTime) {
+          lastUpdateTime = updateTime;
+          console.log('📊 Expenses updated, refreshing visuals...');
+          await loadExpenseData();
+        }
+      } catch (error) {
+        console.log('Error checking for updates:', error);
+      }
+    };
+    
+    // Check immediately on mount
+    checkForUpdates();
+    
+    // Check periodically when screen is visible
+    const interval = setInterval(checkForUpdates, 3000); // Every 3 seconds
+    
+    return () => clearInterval(interval);
+  }, []);
+
   const loadExpenseData = async () => {
     try {
       const user = await AsyncStorage.getItem('currentUser');

@@ -152,6 +152,20 @@ export default function ReminderConfigModal({
                   <Text style={styles.changeText}>Tap to change</Text>
                 </TouchableOpacity>
 
+                {/* Time Picker */}
+                {showTimePicker && (
+                  <View style={{ backgroundColor: '#f0f0f0', borderRadius: 10, paddingVertical: 10, marginVertical: 10, alignItems: 'center', justifyContent: 'center' }}>
+                    <DateTimePicker
+                      value={timeToDate(reminderTime)}
+                      mode="time"
+                      is24Hour={false}
+                      display="spinner"
+                      onChange={handleTimeChange}
+                      textColor="#000000"
+                    />
+                  </View>
+                )}
+
                 {/* Days Selection (for weekly) */}
                 {reminderType === 'weekly' && (
                   <>
@@ -203,17 +217,6 @@ export default function ReminderConfigModal({
                   </TouchableOpacity>
                 </View>
               </ScrollView>
-
-              {/* Time Picker */}
-              {showTimePicker && (
-                <DateTimePicker
-                  value={timeToDate(reminderTime)}
-                  mode="time"
-                  is24Hour={false}
-                  display="spinner"
-                  onChange={handleTimeChange}
-                />
-              )}
             </View>
           </TouchableWithoutFeedback>
         </View>

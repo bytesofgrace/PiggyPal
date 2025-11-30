@@ -1,10 +1,12 @@
 // src/components/TimePickerModal.js
-import DateTimePicker from '@react-native-community/datetimepicker';
 import { useState } from 'react';
 import {
+    Alert,
     Modal,
+    ScrollView,
     StyleSheet,
     Text,
+    TextInput,
     TouchableOpacity,
     TouchableWithoutFeedback,
     View,
@@ -12,30 +14,40 @@ import {
 import { colors } from '../utils/colors';
 
 const TimePickerModal = ({ visible, currentTime, onTimeChange, onClose }) => {
-  const [tempTime, setTempTime] = useState(() => {
-    const [hours, minutes] = currentTime.split(':').map(Number);
-    const date = new Date();
-    date.setHours(hours, minutes, 0, 0);
-    return date;
+  const [hours, setHours] = useState(() => {
+    const [h] = currentTime.split(':');
+    return h;
+  });
+  
+  const [minutes, setMinutes] = useState(() => {
+    const [, m] = currentTime.split(':');
+    return m;
   });
 
-  const handleTimeChange = (event, selectedTime) => {
-    // iOS handling
-    if (selectedTime) {
-      setTempTime(selectedTime);
-    }
-  };
-
   const handleConfirm = () => {
-    const timeString = tempTime.toTimeString().slice(0, 5);
+    const h = parseInt(hours) || 0;
+    const m = parseInt(minutes) || 0;
+    
+    if (h < 0 || h > 23) {
+      Alert.alert('Invalid Hour', 'Please enter a hour between 0-23');
+      return;
+    }
+    
+    if (m < 0 || m > 59) {
+      Alert.alert('Invalid Minutes', 'Please enter minutes between 0-59');
+      return;
+    }
+    
+    const timeString = `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
     onTimeChange(timeString);
     onClose();
   };
 
-  const formatTime = (time) => {
-    const [hours, minutes] = time.split(':').map(Number);
+  const formatTime = (h, m) => {
+    const hour = parseInt(h) || 0;
+    const minute = parseInt(m) || 0;
     const date = new Date();
-    date.setHours(hours, minutes, 0, 0);
+    date.setHours(hour, minute, 0, 0);
     return date.toLocaleTimeString('en-US', {
       hour: 'numeric',
       minute: '2-digit',
@@ -55,36 +67,62 @@ const TimePickerModal = ({ visible, currentTime, onTimeChange, onClose }) => {
         <View style={styles.modalOverlay}>
           <TouchableWithoutFeedback onPress={() => {}}>
             <View style={styles.modalContainer}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Daily Reminder Time</Text>
-                <Text style={styles.modalSubtitle}>
-                  Choose when you'd like to receive daily savings reminders
-                </Text>
-              </View>
+              <ScrollView 
+                showsVerticalScrollIndicator={false}
+                bounces={false}
+              >
+                <View style={styles.modalHeader}>
+                  <Text style={styles.modalTitle}>⏰ Daily Reminder Time</Text>
+                  <Text style={styles.modalSubtitle}>
+                    Enter the time (24-hour format)
+                  </Text>
+                </View>
 
-              <View style={styles.timeDisplay}>
-                <Text style={styles.currentTimeLabel}>Current time:</Text>
-                <Text style={styles.currentTime}>{formatTime(currentTime)}</Text>
-              </View>
+                <View style={styles.timeInputContainer}>
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>Hour (0-23)</Text>
+                    <TextInput
+                      style={styles.timeInput}
+                      value={hours}
+                      onChangeText={setHours}
+                      keyboardType="number-pad"
+                      maxLength={2}
+                      placeholder="19"
+                      placeholderTextColor="#9CA3AF"
+                    />
+                  </View>
+                  
+                  <Text style={styles.timeSeparator}>:</Text>
+                  
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>Minutes (0-59)</Text>
+                    <TextInput
+                      style={styles.timeInput}
+                      value={minutes}
+                      onChangeText={setMinutes}
+                      keyboardType="number-pad"
+                      maxLength={2}
+                      placeholder="00"
+                      placeholderTextColor="#9CA3AF"
+                    />
+                  </View>
+                </View>
 
-              <DateTimePicker
-                value={tempTime}
-                mode="time"
-                is24Hour={false}
-                display="spinner"
-                onChange={handleTimeChange}
-                style={styles.timePicker}
-              />
+                <View style={styles.timeDisplay}>
+                  <Text style={styles.currentTimeLabel}>Preview:</Text>
+                  <Text style={styles.currentTime}>{formatTime(hours, minutes)}</Text>
+                </View>
 
-              <View style={styles.buttonContainer}>
-                <TouchableOpacity style={styles.cancelButton} onPress={onClose}>
-                  <Text style={styles.cancelButtonText}>Cancel</Text>
-                </TouchableOpacity>
-                
-                <TouchableOpacity style={styles.confirmButton} onPress={handleConfirm}>
-                  <Text style={styles.confirmButtonText}>Set Time</Text>
-                </TouchableOpacity>
-              </View>
+                <View style={styles.buttonContainer}>
+                  <TouchableOpacity style={styles.cancelButton} onPress={onClose}>
+                    <Text style={styles.cancelButtonText}>Cancel</Text>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity style={styles.confirmButton} onPress={handleConfirm}>
+                    <Text style={styles.confirmButtonText}>Set Time</Text>
+                  </TouchableOpacity>
+                </View>
+              </ScrollView>
             </View>
           </TouchableWithoutFeedback>
         </View>
@@ -148,6 +186,45 @@ const styles = StyleSheet.create({
   },
   timePicker: {
     marginVertical: 20,
+  },
+  pickerWrapper: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginVertical: 10,
+    paddingVertical: 10,
+  },
+  timeInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: 20,
+  },
+  inputGroup: {
+    alignItems: 'center',
+  },
+  inputLabel: {
+    fontSize: 12,
+    color: colors.textLight,
+    marginBottom: 8,
+  },
+  timeInput: {
+    width: 80,
+    height: 60,
+    borderWidth: 2,
+    borderColor: colors.primary,
+    borderRadius: 12,
+    fontSize: 32,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    color: colors.text,
+    backgroundColor: '#f9f9f9',
+  },
+  timeSeparator: {
+    fontSize: 40,
+    fontWeight: 'bold',
+    color: colors.primary,
+    marginHorizontal: 10,
+    marginTop: 20,
   },
   buttonContainer: {
     flexDirection: 'row',

@@ -116,10 +116,7 @@ export default function AppNavigator() {
         name="Achievements" 
         component={AchievementsScreen}
         options={{
-          headerShown: true,
-          headerStyle: { backgroundColor: '#FF6B9D' },
-          headerTintColor: '#FFFFFF',
-          headerTitle: 'Achievements',
+          headerShown: false,
         }}
       />
     </Stack.Navigator>

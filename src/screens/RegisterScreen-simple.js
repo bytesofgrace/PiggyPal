@@ -3,12 +3,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useState } from 'react';
 import {
     Alert,
+    Keyboard,
     KeyboardAvoidingView,
     Platform,
     StyleSheet,
     Text,
     TextInput,
     TouchableOpacity,
+    TouchableWithoutFeedback,
     View,
 } from 'react-native';
 
@@ -62,12 +64,20 @@ export default function RegisterScreen({ navigation }) {
   };
 
   return (
-    <KeyboardAvoidingView 
-      style={styles.container} 
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <View style={styles.formContainer}>
-        <Text style={styles.title}>🐷 Become a Piggy Pal!</Text>
+    <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+      <KeyboardAvoidingView 
+        style={styles.container} 
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <TouchableOpacity 
+          style={styles.backButton}
+          onPress={() => navigation.goBack()}
+        >
+          <Text style={styles.backButtonText}>← Back</Text>
+        </TouchableOpacity>
+        
+        <View style={styles.formContainer}>
+          <Text style={styles.title}>🐷 Become a Piggy Pal!</Text>
         
         <TextInput
           style={styles.input}
@@ -75,6 +85,7 @@ export default function RegisterScreen({ navigation }) {
           value={name}
           onChangeText={setName}
           autoCapitalize="words"
+          placeholderTextColor="#9CA3AF"
         />
         
         <TextInput
@@ -84,6 +95,7 @@ export default function RegisterScreen({ navigation }) {
           onChangeText={setEmail}
           keyboardType="email-address"
           autoCapitalize="none"
+          placeholderTextColor="#9CA3AF"
         />
         
         <TextInput
@@ -92,6 +104,7 @@ export default function RegisterScreen({ navigation }) {
           value={password}
           onChangeText={setPassword}
           secureTextEntry
+          placeholderTextColor="#9CA3AF"
         />
         
         <TextInput
@@ -100,6 +113,7 @@ export default function RegisterScreen({ navigation }) {
           value={confirmPassword}
           onChangeText={setConfirmPassword}
           secureTextEntry
+          placeholderTextColor="#9CA3AF"
         />
         
         <TouchableOpacity style={styles.button} onPress={handleRegister}>
@@ -114,6 +128,7 @@ export default function RegisterScreen({ navigation }) {
         </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
+    </TouchableWithoutFeedback>
   );
 }
 
@@ -121,6 +136,18 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#FF6B9D',
+  },
+  backButton: {
+    position: 'absolute',
+    top: 50,
+    left: 20,
+    zIndex: 10,
+    padding: 10,
+  },
+  backButtonText: {
+    color: 'white',
+    fontSize: 18,
+    fontWeight: 'bold',
   },
   formContainer: {
     flex: 1,

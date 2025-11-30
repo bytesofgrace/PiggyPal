@@ -202,19 +202,63 @@ export default function ExpenseScreen() {
       const expensesData = await AsyncStorage.getItem(`expenses_${user}`);
       if (expensesData) {
         const expensesList = JSON.parse(expensesData);
+        
+        // Smart deletion: Preserve current week and current month for goal tracking
+        const now = new Date();
+        const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        const currentWeekStart = new Date(now);
+        currentWeekStart.setDate(now.getDate() - now.getDay()); // Start of week (Sunday)
+        currentWeekStart.setHours(0, 0, 0, 0);
+        
+        const deletedExpenseIds = [];
         const filteredExpenses = expensesList.filter(expense => {
           const expenseDate = new Date(expense.date);
-          return expenseDate >= cutoffDate;
+          
+          // Keep if within retention period
+          if (expenseDate >= cutoffDate) return true;
+          
+          // Keep if in current week (for weekly goal tracking)
+          if (expenseDate >= currentWeekStart) {
+            console.log('⚠️ Preserving expense from current week for goal tracking');
+            return true;
+          }
+          
+          // Keep if in current month (for monthly goal tracking)
+          if (expenseDate >= currentMonthStart) {
+            console.log('⚠️ Preserving expense from current month for goal tracking');
+            return true;
+          }
+          
+          // Mark for deletion
+          deletedExpenseIds.push(expense.id);
+          return false;
         });
 
-        if (filteredExpenses.length !== expensesList.length) {
+        if (deletedExpenseIds.length > 0) {
+          // Update local storage
           await AsyncStorage.setItem(`expenses_${user}`, JSON.stringify(filteredExpenses));
           setExpenses(filteredExpenses);
-          console.log(`Auto-deleted ${expensesList.length - filteredExpenses.length} old expenses`);
+          
+          console.log(`🗑️ Auto-deleted ${deletedExpenseIds.length} old expenses (preserved current week/month)`);
+          
+          // Queue deletions for Firebase sync
+          for (const expenseId of deletedExpenseIds) {
+            try {
+              await syncService.deleteExpense(expenseId, user);
+              console.log(`✅ Queued deletion for expense ${expenseId}`);
+            } catch (error) {
+              console.error(`❌ Failed to queue deletion for expense ${expenseId}:`, error);
+            }
+          }
+          
+          // Notify that data has changed (for Visuals screen to update)
+          await AsyncStorage.setItem('expenses_updated', Date.now().toString());
+        } else {
+          console.log('✅ No expenses to auto-delete');
         }
       }
     } catch (error) {
-      console.log('Error auto-deleting old expenses:', error);
+      console.log('❌ Error auto-deleting old expenses:', error);
     }
   };
 
@@ -502,14 +546,6 @@ export default function ExpenseScreen() {
       <View style={styles.header}>
         <View style={styles.headerTop}>
           <Text style={styles.headerTitle}>{headerMessage}</Text>
-          {expenses.length > 0 && (
-            <TouchableOpacity 
-              style={styles.bulkDeleteButton}
-              onPress={handleBulkDelete}
-            >
-              <Text style={styles.bulkDeleteText}>🗑️</Text>
-            </TouchableOpacity>
-          )}
         </View>
       </View>
 
@@ -577,7 +613,7 @@ export default function ExpenseScreen() {
               placeholder="What is it for? 📝"
               value={title}
               onChangeText={setTitle}
-              placeholderTextColor={colors.textLight}
+              placeholderTextColor="#9CA3AF"
             />
 
             <TextInput
@@ -586,7 +622,7 @@ export default function ExpenseScreen() {
               value={amount}
               onChangeText={setAmount}
               keyboardType="decimal-pad"
-              placeholderTextColor={colors.textLight}
+              placeholderTextColor="#9CA3AF"
             />
 
             <Text style={styles.typeLabel}>Date:</Text>
@@ -600,17 +636,20 @@ export default function ExpenseScreen() {
             </TouchableOpacity>
 
             {showDatePicker && (
-              <DateTimePicker
-                value={selectedDate}
-                mode="date"
-                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                onChange={(event, date) => {
-                  setShowDatePicker(Platform.OS === 'ios');
-                  if (date) {
-                    setSelectedDate(date);
-                  }
-                }}
-              />
+              <View style={{ backgroundColor: '#f0f0f0', borderRadius: 10, paddingVertical: 10, marginVertical: 10, alignItems: 'center', justifyContent: 'center' }}>
+                <DateTimePicker
+                  value={selectedDate}
+                  mode="date"
+                  display="spinner"
+                  onChange={(event, date) => {
+                    setShowDatePicker(Platform.OS === 'ios');
+                    if (date) {
+                      setSelectedDate(date);
+                    }
+                  }}
+                  textColor="#000000"
+                />
+              </View>
             )}
 
             <Text style={styles.typeLabel}>Type:</Text>
@@ -681,11 +720,22 @@ export default function ExpenseScreen() {
         <TouchableOpacity
           style={[styles.fab, styles.fabTouchable]}
           onPress={openAddModal}
-          activeOpacity={0.8}
+          activeOpacity={0.7}
         >
           <Text style={styles.fabText}>+</Text>
         </TouchableOpacity>
       </View>
+
+      {/* Bulk Delete Button - Bottom Left */}
+      {expenses.length > 0 && (
+        <TouchableOpacity 
+          style={styles.bulkDeleteButton}
+          onPress={handleBulkDelete}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.bulkDeleteText}>🗑️</Text>
+        </TouchableOpacity>
+      )}
 
       {/* Confetti Effect */}
       {showConfetti && (
@@ -733,15 +783,24 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   bulkDeleteButton: {
-    backgroundColor: colors.accent,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    position: 'absolute',
+    bottom: 30,
+    left: 15,
+    backgroundColor: colors.primary,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     alignItems: 'center',
     justifyContent: 'center',
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    zIndex: 1000,
   },
   bulkDeleteText: {
-    fontSize: 20,
+    fontSize: 28,
   },
   listContainer: {
     padding: 20,
