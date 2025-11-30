@@ -115,6 +115,33 @@ export default function AchievementsScreen({ navigation }) {
       if (currentUser) {
         const achievementList = await achievementService.getAchievements(currentUser);
         const statistics = await achievementService.getAchievementStats(currentUser);
+        // DEBUG: log raw achievement timestamps and parsed local dates to help debug date grouping
+        try {
+          const stripTime = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+          const parseDate = (value) => {
+            if (!value) return new Date(0);
+            if (typeof value === 'number') return new Date(value);
+            if (typeof value === 'string') {
+              if (/^\d+$/.test(value)) {
+                return value.length === 10 ? new Date(Number(value) * 1000) : new Date(Number(value));
+              }
+              return new Date(value);
+            }
+            return new Date(value);
+          };
+
+          console.log('--- Achievements DEBUG DUMP ---');
+          achievementList.forEach((a, idx) => {
+            const raw = { achievedAt: a.achievedAt, achievedAtMs: a.achievedAtMs };
+            const parsed = parseDate(a.achievedAtMs || a.achievedAt);
+            const localDate = parsed.toLocaleString();
+            const diffDays = Math.floor((stripTime(new Date()) - stripTime(parsed)) / (1000 * 60 * 60 * 24));
+            console.log(`[#${idx}] id=${a.id} amount=$${a.actualAmount} raw=${JSON.stringify(raw)} parsed=${parsed.toISOString()} local=${localDate} diffDays=${diffDays}`);
+          });
+          console.log('--- End Achievements DEBUG DUMP ---');
+        } catch (e) {
+          console.warn('Debug dump failed', e);
+        }
         
         const groupedSections = groupAchievementsByTimeline(achievementList);
         setSections(groupedSections);
