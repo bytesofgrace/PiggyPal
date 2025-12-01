@@ -44,6 +44,9 @@ export default function ExpenseScreen() {
   
   // Confetti state
   const [showConfetti, setShowConfetti] = useState(false);
+  
+  // Delete confirmation modal state
+  const [deleteExpense, setDeleteExpense] = useState(null);
 
   // No animation values needed
 
@@ -467,36 +470,32 @@ export default function ExpenseScreen() {
   };
 
   const handleDelete = (expense) => {
-    Alert.alert(
-      'Delete? 🗑️',
-      `Are you sure you want to delete "${expense.title}"?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const user = await AsyncStorage.getItem('currentUser');
-              if (!user) {
-                Alert.alert('Error', 'User not found');
-                return;
-              }
+    setDeleteExpense(expense);
+  };
 
-              const result = await syncService.deleteExpense(expense.id, user);
-              
-              if (result.success) {
-                setExpenses(result.data);
-              } else {
-                Alert.alert('Error', `Failed to delete: ${result.error}`);
-              }
-            } catch (error) {
-              Alert.alert('Error', 'Failed to delete! 😅');
-            }
-          },
-        },
-      ]
-    );
+  const confirmDelete = async () => {
+    if (!deleteExpense) return;
+    
+    try {
+      const user = await AsyncStorage.getItem('currentUser');
+      if (!user) {
+        Alert.alert('Error', 'User not found');
+        setDeleteExpense(null);
+        return;
+      }
+
+      const result = await syncService.deleteExpense(deleteExpense.id, user);
+      
+      if (result.success) {
+        setExpenses(result.data);
+      } else {
+        Alert.alert('Error', `Failed to delete: ${result.error}`);
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Failed to delete! 😅');
+    }
+    
+    setDeleteExpense(null);
   };
 
   const renderExpenseItem = ({ item }) => (
@@ -705,6 +704,45 @@ export default function ExpenseScreen() {
                 </Text>
               </TouchableOpacity>
             </View>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <Modal
+        visible={deleteExpense !== null}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setDeleteExpense(null)}
+      >
+        <TouchableWithoutFeedback onPress={() => setDeleteExpense(null)}>
+          <View style={styles.deleteModalOverlay}>
+            <TouchableWithoutFeedback onPress={() => {}}>
+              <View style={styles.deleteModalContainer}>
+                <View style={styles.deleteModalHeader}>
+                  <Text style={styles.deleteModalTitle}>Delete? 🗑️</Text>
+                  <Text style={styles.deleteModalSubtitle}>
+                    Are you sure you want to delete "{deleteExpense?.title}"?
+                  </Text>
+                </View>
+                
+                <View style={styles.deleteModalButtons}>
+                  <TouchableOpacity
+                    style={styles.deleteModalCancelButton}
+                    onPress={() => setDeleteExpense(null)}
+                  >
+                    <Text style={styles.deleteModalCancelText}>Cancel</Text>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity
+                    style={styles.deleteModalDeleteButton}
+                    onPress={confirmDelete}
+                  >
+                    <Text style={styles.deleteModalDeleteText}>Delete</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             </TouchableWithoutFeedback>
           </View>
@@ -1046,6 +1084,68 @@ const styles = StyleSheet.create({
     color: colors.white,
     fontWeight: 'bold',
     fontSize: 16,
+  },
+  deleteModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  deleteModalContainer: {
+    backgroundColor: 'white',
+    margin: 20,
+    borderRadius: 20,
+    padding: 20,
+    width: '90%',
+    maxWidth: 400,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  deleteModalHeader: {
+    marginBottom: 20,
+  },
+  deleteModalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: colors.text,
+    marginBottom: 8,
+  },
+  deleteModalSubtitle: {
+    fontSize: 14,
+    color: colors.textLight,
+    lineHeight: 20,
+  },
+  deleteModalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  deleteModalCancelButton: {
+    flex: 1,
+    backgroundColor: colors.lightGray,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  deleteModalCancelText: {
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  deleteModalDeleteButton: {
+    flex: 1,
+    backgroundColor: '#FFEBEE',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  deleteModalDeleteText: {
+    color: '#C62828',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
   fabShadowContainer: {
     position: 'absolute',
