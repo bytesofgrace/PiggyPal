@@ -9,35 +9,39 @@ import {
 } from 'react-native';
 import { demonstrateNotification, getRandomMotivationalMessage } from '../utils/notificationService';
 import { colors } from '../utils/colors';
-import { showCustomAlert } from './CustomAlert';
 
 export default function NotificationDemo() {
   const [isLoading, setIsLoading] = useState(false);
 
   const handleDemoNotification = async () => {
+    console.log('🔔 Demo notification button pressed!');
     setIsLoading(true);
     try {
       const message = getRandomMotivationalMessage();
+      console.log('📨 Sending notification with message:', message);
+      
       await demonstrateNotification(
         '💰 PiggyPal Demo',
         message,
         '✨ This is how your reminders will look!'
       );
       
-      showCustomAlert(
+      console.log('✅ Notification sent successfully, showing success alert');
+      Alert.alert(
         '🎉 Demo Sent!',
         'Check your notification! In Expo Go, notifications appear at the top of the screen.',
         [{ text: 'Got it!', style: 'default' }]
       );
     } catch (error) {
-      console.error('Demo notification error:', error);
-      showCustomAlert(
+      console.error('❌ Demo notification error:', error);
+      Alert.alert(
         'Demo Error',
         'Could not send demo notification. Make sure notifications are enabled in your device settings.',
         [{ text: 'OK', style: 'default' }]
       );
     } finally {
       setIsLoading(false);
+      console.log('🏁 Demo notification process completed');
     }
   };
 
@@ -52,8 +56,13 @@ export default function NotificationDemo() {
 
       <TouchableOpacity 
         style={[styles.demoButton, isLoading && styles.demoButtonDisabled]}
-        onPress={handleDemoNotification}
+        onPress={() => {
+          console.log('🖱️ TouchableOpacity pressed - Demo Notification button');
+          handleDemoNotification();
+        }}
         disabled={isLoading}
+        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        activeOpacity={0.7}
       >
         <Text style={styles.demoButtonText}>
           {isLoading ? '⏳ Sending Demo...' : '🔔 Send Demo Notification'}

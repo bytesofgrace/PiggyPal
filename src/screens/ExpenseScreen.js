@@ -208,16 +208,11 @@ export default function ExpenseScreen() {
         // Only restore draft if it's less than 24 hours old
         const hoursSinceDraft = (Date.now() - draft.timestamp) / (1000 * 60 * 60);
         if (hoursSinceDraft < 24) {
-          // Check if draft has meaningful content before restoring
+          // Check if draft has meaningful content before asking user
           const hasTitle = draft.title && typeof draft.title === 'string' && draft.title.trim().length > 0;
           const hasAmount = draft.amount && typeof draft.amount === 'string' && draft.amount.trim().length > 0;
           
-          setTitle(draft.title || '');
-          setAmount(draft.amount || '');
-          setType(draft.type || 'spending');
-          setSelectedDate(draft.selectedDate ? new Date(draft.selectedDate) : new Date());
-          
-          // Only show alert if draft has meaningful content
+          // Only show alert if draft has meaningful content - DON'T restore to form yet
           if (hasTitle || hasAmount) {
             const draftPreview = `${draft.title || 'Untitled'} - $${draft.amount || '0'}`;
             showCustomAlert(
@@ -227,16 +222,49 @@ export default function ExpenseScreen() {
                 { 
                   text: 'Start Fresh', 
                   onPress: async () => {
-                    await clearDraft();
-                    setTitle('');
-                    setAmount('');
-                    setType('spending');
-                    setSelectedDate(new Date());
+                    console.log('🔄 Start Fresh - DELETING ALL ENTRIES AND DRAFTS');
+                    
+                    try {
+                      const user = await AsyncStorage.getItem('currentUser');
+                      if (user) {
+                        // DELETE ALL EXPENSE ENTRIES
+                        await AsyncStorage.setItem(`expenses_${user}`, JSON.stringify([]));
+                        setExpenses([]); // Clear from UI immediately
+                        console.log('🗑️ ALL EXPENSE ENTRIES DELETED');
+                        
+                        // Clear all drafts too
+                        await AsyncStorage.removeItem(`expense_draft_${user}`);
+                        await AsyncStorage.removeItem(`expenseDraft`);
+                        await AsyncStorage.removeItem(`draft_${user}`);
+                        console.log('🗑️ ALL DRAFTS CLEARED');
+                      }
+                      
+                      // Reset form to completely fresh state
+                      setTitle('');
+                      setAmount('');
+                      setType('spending');
+                      setSelectedDate(new Date());
+                      
+                      console.log('✅ COMPLETE FRESH START - ALL DATA DELETED');
+                      
+                      Alert.alert('🗑️ Complete Fresh Start!', 'ALL your expense entries and drafts have been DELETED! Starting completely fresh.');
+                      
+                    } catch (error) {
+                      console.log('❌ Error deleting data:', error);
+                      Alert.alert('Error', 'Could not delete all data.');
+                    }
                   }
                 },
                 { 
                   text: 'Keep Draft', 
-                  onPress: () => console.log('Draft kept') 
+                  onPress: () => {
+                    console.log('📝 Keeping draft - restoring to form');
+                    // NOW restore the draft to the form
+                    setTitle(draft.title || '');
+                    setAmount(draft.amount || '');
+                    setType(draft.type || 'spending');
+                    setSelectedDate(draft.selectedDate ? new Date(draft.selectedDate) : new Date());
+                  }
                 }
               ]
             );
@@ -257,10 +285,15 @@ export default function ExpenseScreen() {
   const clearDraft = async () => {
     try {
       const user = await AsyncStorage.getItem('currentUser');
-      if (!user) return;
+      console.log('🔄 clearDraft called for user:', user);
+      if (!user) {
+        console.log('❌ No user found in clearDraft');
+        return;
+      }
       await AsyncStorage.removeItem(`expense_draft_${user}`);
+      console.log('✅ Draft removed from storage:', `expense_draft_${user}`);
     } catch (error) {
-      console.log('Error clearing draft:', error);
+      console.log('❌ Error clearing draft:', error);
     }
   };
 
@@ -365,7 +398,10 @@ export default function ExpenseScreen() {
 
   // Bulk delete all expenses
   const handleBulkDelete = () => {
-    showCustomAlert(
+    console.log('🗑️ Bulk delete button pressed!');
+    
+    // Use native Alert since CustomAlert seems to be having issues
+    Alert.alert(
       '🗑️ Delete All Data?',
       'This will permanently delete ALL your savings and spending records. This action cannot be undone!',
       [
@@ -386,12 +422,12 @@ export default function ExpenseScreen() {
               await AsyncStorage.setItem(`expenses_${user}`, JSON.stringify([]));
               setExpenses([]);
               
-              showCustomAlert(
+              Alert.alert(
                 '✅ All Clear!',
                 'All your expense records have been deleted.'
               );
             } catch (error) {
-              showCustomAlert('Error', 'Failed to delete records. Please try again.');
+              Alert.alert('Error', 'Failed to delete records. Please try again.');
             }
           }
         }
@@ -572,25 +608,39 @@ export default function ExpenseScreen() {
   };
 
   const openEditModal = (expense) => {
-    setEditingExpense(expense);
-    setTitle(expense.title);
-    setAmount(expense.amount.toString());
-    setType(expense.type);
-    setSelectedDate(expense.date ? new Date(expense.date) : new Date());
-    setModalVisible(true);
+    console.log('📝 openEditModal called for expense:', expense.title);
+    
+    try {
+      setEditingExpense(expense);
+      setTitle(expense.title);
+      setAmount(expense.amount.toString());
+      setType(expense.type);
+      setSelectedDate(expense.date ? new Date(expense.date) : new Date());
+      setModalVisible(true);
+      console.log('✅ Edit modal opened successfully');
+    } catch (error) {
+      console.log('❌ Error opening edit modal:', error);
+      Alert.alert('Error', 'Could not open edit form. Please try again.');
+    }
   };
 
   const handleSave = async () => {
+    console.log('💾 handleSave called');
+    
     if (!title || !amount) {
-      showCustomAlert('Oops!', 'Please fill in all fields! 📝');
+      console.log('❌ Missing fields - title:', title, 'amount:', amount);
+      Alert.alert('Oops!', 'Please fill in all fields! 📝');
       return;
     }
 
     const numAmount = parseFloat(amount);
     if (isNaN(numAmount) || numAmount <= 0) {
-      showCustomAlert('Oops!', 'Please enter a valid amount! 💵');
+      console.log('❌ Invalid amount:', amount);
+      Alert.alert('Oops!', 'Please enter a valid amount! 💵');
       return;
     }
+    
+    console.log('✅ Validation passed, proceeding with save');
 
     setIsSaving(true);
     try {
@@ -650,33 +700,62 @@ export default function ExpenseScreen() {
   };
 
   const handleDelete = (expense) => {
-    setDeleteExpense(expense);
+    console.log('🗑️ handleDelete called for expense:', expense.title);
+    
+    Alert.alert(
+      'Delete Expense? 🗑️',
+      `Are you sure you want to delete "${expense.title}"?`,
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+          onPress: () => console.log('❌ Delete cancelled')
+        },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            console.log('🗑️ User confirmed delete');
+            confirmDelete(expense);
+          }
+        }
+      ]
+    );
   };
 
-  const confirmDelete = async () => {
-    if (!deleteExpense) return;
+  const confirmDelete = async (expense) => {
+    if (!expense) {
+      console.log('❌ No expense provided to confirmDelete');
+      return;
+    }
     
+    console.log('🗑️ Confirming delete for:', expense.title);
     setIsDeleting(true);
+    
     try {
       const user = await AsyncStorage.getItem('currentUser');
       if (!user) {
-        showCustomAlert('Error', 'User not found');
-        setDeleteExpense(null);
+        console.log('❌ User not found');
+        Alert.alert('Error', 'User not found');
         return;
       }
 
-      const result = await syncService.deleteExpense(deleteExpense.id, user);
+      console.log('🔄 Deleting expense with ID:', expense.id);
+      const result = await syncService.deleteExpense(expense.id, user);
       
       if (result.success) {
+        console.log('✅ Delete successful, updating expenses list');
         setExpenses(result.data);
+        Alert.alert('✅ Deleted!', `"${expense.title}" has been deleted.`);
       } else {
-        showCustomAlert('Error', `Failed to delete: ${result.error}`);
+        console.log('❌ Delete failed:', result.error);
+        Alert.alert('Error', `Failed to delete: ${result.error}`);
       }
     } catch (error) {
-      showCustomAlert('Error', 'Failed to delete! 😅');
+      console.log('❌ Delete error:', error);
+      Alert.alert('Error', 'Failed to delete! 😅');
     } finally {
       setIsDeleting(false);
-      setDeleteExpense(null);
     }
   };
 
@@ -705,18 +784,48 @@ export default function ExpenseScreen() {
           </Text>
           <View style={styles.expenseActions}>
             <TouchableOpacity
-              style={styles.iconButton}
-              onPress={() => openEditModal(item)}
-              activeOpacity={0.7}
+              style={[styles.iconButton, {
+                zIndex: 999,
+                elevation: 8,
+                backgroundColor: 'rgba(255,255,255,0.9)',
+                borderRadius: 20,
+                minWidth: 40,
+                minHeight: 40,
+                justifyContent: 'center',
+                alignItems: 'center'
+              }]}
+              onPress={() => {
+                console.log('✏️ EDIT BUTTON TAPPED for:', item.title, item.id);
+                openEditModal(item);
+              }}
+              activeOpacity={0.6}
+              hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
+              pointerEvents="auto"
             >
-              <Text style={styles.editIcon}>✏️</Text>
+              <Text style={[styles.editIcon, { fontSize: 18 }]}>✏️</Text>
             </TouchableOpacity>
+            
             <TouchableOpacity
-              style={styles.iconButton}
-              onPress={() => handleDelete(item)}
-              activeOpacity={0.7}
+              style={[styles.iconButton, {
+                zIndex: 999,
+                elevation: 8,
+                backgroundColor: 'rgba(255,255,255,0.9)',
+                borderRadius: 20,
+                minWidth: 40,
+                minHeight: 40,
+                justifyContent: 'center',
+                alignItems: 'center',
+                marginLeft: 8
+              }]}
+              onPress={() => {
+                console.log('🗑️ DELETE BUTTON TAPPED for:', item.title, item.id);
+                handleDelete(item);
+              }}
+              activeOpacity={0.6}
+              hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
+              pointerEvents="auto"
             >
-              <Text style={styles.deleteIcon}>🗑️</Text>
+              <Text style={[styles.deleteIcon, { fontSize: 18 }]}>🗑️</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -885,7 +994,13 @@ export default function ExpenseScreen() {
             <View style={styles.modalButtons}>
               <TouchableOpacity
                 style={styles.cancelButton}
-                onPress={handleCloseModal}
+                onPress={() => {
+                  console.log('❌ Cancel button pressed');
+                  // Force close modal immediately for now
+                  setModalVisible(false);
+                  setEditingExpense(null);
+                  console.log('✅ Modal closed');
+                }}
                 activeOpacity={0.7}
               >
                 <Text style={styles.cancelButtonText}>Cancel</Text>
@@ -985,8 +1100,13 @@ export default function ExpenseScreen() {
       {expenses.length > 0 && (
         <TouchableOpacity 
           style={styles.bulkDeleteButton}
-          onPress={handleBulkDelete}
+          onPress={() => {
+            console.log('🔥 TouchableOpacity pressed!');
+            handleBulkDelete();
+          }}
           activeOpacity={0.7}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          testID="bulk-delete-button"
         >
           <Text style={styles.bulkDeleteText}>🗑️</Text>
         </TouchableOpacity>
@@ -1117,12 +1237,14 @@ const styles = StyleSheet.create({
     borderRadius: 32,
     alignItems: 'center',
     justifyContent: 'center',
-    elevation: 5,
+    elevation: 10,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    zIndex: 1000,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+    zIndex: 9999,
+    borderWidth: 2,
+    borderColor: '#fff',
   },
   bulkDeleteText: {
     fontSize: 28,
@@ -1227,6 +1349,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginHorizontal: 4,
+    backgroundColor: 'rgba(0, 0, 0, 0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(0, 0, 0, 0.1)',
   },
   editIcon: {
     fontSize: 18,

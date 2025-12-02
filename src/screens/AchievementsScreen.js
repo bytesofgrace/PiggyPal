@@ -2,7 +2,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useState } from 'react';
 import {
-  Alert,
   Modal,
   SectionList,
   StyleSheet,
@@ -14,6 +13,7 @@ import {
 import { useFocusEffect } from '@react-navigation/native';
 import achievementService from '../utils/achievementService';
 import { colors } from '../utils/colors';
+import CustomAlert, { showCustomAlert } from '../components/CustomAlert';
 
 export default function AchievementsScreen({ navigation }) {
   const [sections, setSections] = useState([]);
@@ -164,13 +164,13 @@ export default function AchievementsScreen({ navigation }) {
     const result = await achievementService.deleteOldAchievements(user, days);
     if (result.success) {
       await loadAchievements();
-      Alert.alert(
+      showCustomAlert(
         '✅ Cleaned Up!',
         `Deleted ${result.deletedCount} old achievement${result.deletedCount !== 1 ? 's' : ''}.`,
-        [{ text: 'OK' }]
+        [{ text: 'OK', onPress: () => console.log('Delete old achievements confirmed') }]
       );
     } else {
-      Alert.alert('Error', 'Failed to delete achievements.');
+      showCustomAlert('Error', 'Failed to delete achievements.');
     }
   };
 
@@ -294,9 +294,9 @@ export default function AchievementsScreen({ navigation }) {
                       setShowDeleteAllModal(false);
                       if (result.success) {
                         await loadAchievements();
-                        Alert.alert('✅ Deleted!', 'All achievements have been cleared.');
+                        showCustomAlert('✅ Deleted!', 'All achievements have been cleared.');
                       } else {
-                        Alert.alert('Error', 'Failed to delete achievements.');
+                        showCustomAlert('Error', 'Failed to delete achievements.');
                       }
                     }}
                   >
@@ -391,6 +391,9 @@ export default function AchievementsScreen({ navigation }) {
           stickySectionHeadersEnabled={false}
         />
       )}
+      
+      {/* Global Custom Alert */}
+      <CustomAlert />
     </View>
   );
 }
