@@ -220,17 +220,17 @@ export default function SettingsScreen({ navigation }) {
 
   const handleChangePassword = async () => {
     if (!currentPassword || !newPassword || !confirmNewPassword) {
-      showCustomAlert('Error', 'Please fill in all fields');
+      Alert.alert('Error', 'Please fill in all fields');
       return;
     }
 
     if (newPassword !== confirmNewPassword) {
-      showCustomAlert('Error', 'New passwords do not match');
+      Alert.alert('Error', 'New passwords do not match');
       return;
     }
 
     if (newPassword.length < 6) {
-      showCustomAlert('Error', 'Password must be at least 6 characters');
+      Alert.alert('Error', 'Password must be at least 6 characters');
       return;
     }
 
@@ -268,9 +268,9 @@ export default function SettingsScreen({ navigation }) {
       setConfirmNewPassword('');
       
       setShowChangePasswordModal(false);
-      showCustomAlert('Success!', 'Your password has been changed! 🔒');
+      Alert.alert('Success!', 'Your password has been changed! 🔒');
     } catch (error) {
-      showCustomAlert('Error', `Failed to change password: ${error.message}`);
+      Alert.alert('Error', `Failed to change password: ${error.message}`);
     }
   };
 

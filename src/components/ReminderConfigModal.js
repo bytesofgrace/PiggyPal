@@ -12,7 +12,6 @@ import {
     View
 } from 'react-native';
 import { colors } from '../utils/colors';
-import { showCustomAlert } from './CustomAlert';
 
 const DAYS_OF_WEEK = [
   { id: 1, name: 'Sunday', short: 'Sun' },
@@ -66,7 +65,7 @@ export default function ReminderConfigModal({
 
   const handleSave = () => {
     if (reminderType === 'weekly' && selectedDays.length === 0) {
-      showCustomAlert('Error', 'Please select at least one day for weekly reminders.');
+      Alert.alert('Error', 'Please select at least one day for weekly reminders.');
       return;
     }
 

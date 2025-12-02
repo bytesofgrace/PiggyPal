@@ -438,7 +438,7 @@ export default function ExpenseScreen() {
   // Export/Share data function
   const exportData = async () => {
     if (expenses.length === 0) {
-      showCustomAlert('No Data', 'You don\'t have any data to export!');
+      Alert.alert('No Data', 'You don\'t have any data to export!');
       return;
     }
 
@@ -466,7 +466,7 @@ export default function ExpenseScreen() {
       });
     } catch (error) {
       console.log('Error sharing data:', error);
-      showCustomAlert('Error', 'Could not share data. Please try again.');
+      Alert.alert('Error', 'Could not share data. Please try again.');
     }
   };
 
@@ -475,7 +475,7 @@ export default function ExpenseScreen() {
     console.log('🔄 Export function called');
     
     if (expenses.length === 0) {
-      showCustomAlert('No Data', 'You don\'t have any data to export!');
+      Alert.alert('No Data', 'You don\'t have any data to export!');
       return;
     }
 
@@ -515,7 +515,7 @@ export default function ExpenseScreen() {
       console.log('✅ Share completed:', result);
       
       // Show success message regardless of result
-      showCustomAlert(
+      Alert.alert(
         '✅ Export Ready!',
         'Your data export has been prepared. You can now choose to keep or delete your records.',
         [{ text: 'OK', onPress: () => console.log('Export acknowledged') }]
@@ -525,7 +525,7 @@ export default function ExpenseScreen() {
       console.log('❌ Share failed or timed out, showing data directly:', error);
       
       // Fallback: Show the data in an alert for manual copying
-      showCustomAlert(
+      Alert.alert(
         '📊 Your Export Data',
         summary,
         [
@@ -534,7 +534,7 @@ export default function ExpenseScreen() {
             if (Platform.OS === 'web') {
               navigator.clipboard?.writeText(summary);
             }
-            showCustomAlert('📋 Ready!', 'Data displayed above. You can manually copy this information.');
+            Alert.alert('📋 Ready!', 'Data displayed above. You can manually copy this information.');
           }},
           { text: 'OK', onPress: () => console.log('Data shown to user') }
         ]
@@ -543,7 +543,7 @@ export default function ExpenseScreen() {
 
     // After sharing, ask if they want to delete all data
     setTimeout(() => {
-      showCustomAlert(
+      Alert.alert(
         '🗑️ Delete All Data?',
         'Now that you\'ve exported your data, would you like to delete all records?',
         [
@@ -557,9 +557,9 @@ export default function ExpenseScreen() {
                 if (!user) return;
                 await AsyncStorage.setItem(`expenses_${user}`, JSON.stringify([]));
                 setExpenses([]);
-                showCustomAlert('✅ Deleted!', 'All records have been deleted.');
+                Alert.alert('✅ Deleted!', 'All records have been deleted.');
               } catch (error) {
-                showCustomAlert('Error', 'Failed to delete records. Please try again.');
+                Alert.alert('Error', 'Failed to delete records. Please try again.');
               }
             }
           }
@@ -682,17 +682,17 @@ export default function ExpenseScreen() {
       } else {
         // Show detailed validation errors if available
         if (result.validationErrors && result.validationErrors.length > 0) {
-          showCustomAlert(
+          Alert.alert(
             'Validation Error',
             result.validationErrors.join('\n')
           );
         } else {
-          showCustomAlert('Error', `Failed to save: ${result.error}`);
+          Alert.alert('Error', `Failed to save: ${result.error}`);
         }
       }
       
     } catch (error) {
-      showCustomAlert('Error', 'Something went wrong! 😅');
+      Alert.alert('Error', 'Something went wrong! 😅');
       console.error(error);
     } finally {
       setIsSaving(false);

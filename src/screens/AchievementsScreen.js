@@ -164,13 +164,13 @@ export default function AchievementsScreen({ navigation }) {
     const result = await achievementService.deleteOldAchievements(user, days);
     if (result.success) {
       await loadAchievements();
-      showCustomAlert(
+      Alert.alert(
         '✅ Cleaned Up!',
         `Deleted ${result.deletedCount} old achievement${result.deletedCount !== 1 ? 's' : ''}.`,
         [{ text: 'OK', onPress: () => console.log('Delete old achievements confirmed') }]
       );
     } else {
-      showCustomAlert('Error', 'Failed to delete achievements.');
+      Alert.alert('Error', 'Failed to delete achievements.');
     }
   };
 
@@ -294,9 +294,9 @@ export default function AchievementsScreen({ navigation }) {
                       setShowDeleteAllModal(false);
                       if (result.success) {
                         await loadAchievements();
-                        showCustomAlert('✅ Deleted!', 'All achievements have been cleared.');
+                        Alert.alert('✅ Deleted!', 'All achievements have been cleared.');
                       } else {
-                        showCustomAlert('Error', 'Failed to delete achievements.');
+                        Alert.alert('Error', 'Failed to delete achievements.');
                       }
                     }}
                   >
