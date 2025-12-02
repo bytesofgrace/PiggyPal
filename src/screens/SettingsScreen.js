@@ -48,6 +48,7 @@ export default function SettingsScreen({ navigation }) {
   const [showDataRetentionModal, setShowDataRetentionModal] = useState(false);
   const [showEditProfileModal, setShowEditProfileModal] = useState(false);
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
+
   
   // Profile fields
   const [profileName, setProfileName] = useState('');
@@ -535,45 +536,101 @@ export default function SettingsScreen({ navigation }) {
   };
 
   const toggleNotifications = async (value) => {
-    setNotifications(value);
-    await notificationService.updateNotificationSettings({ enabled: value });
-    
-    // Sync all notification settings
-    const result = await syncService.saveNotificationSettings({
-      enabled: value,
-      dailyReminder: dailyReminder,
-      reminderTime: reminderTime
-    });
-    
-    if (!result.success) {
-      Alert.alert('Settings Saved Locally', 'Notification settings will sync when you\'re back online.');
+    try {
+      setNotifications(value);
+      await notificationService.updateNotificationSettings({ enabled: value });
+      
+      // Sync all notification settings
+      const result = await syncService.saveNotificationSettings({
+        enabled: value,
+        dailyReminder: dailyReminder,
+        reminderTime: reminderTime
+      });
+      
+      if (!result.success) {
+        Alert.alert('Settings Saved Locally', 'Notification settings will sync when you\'re back online.');
+      }
+
+      // Show success message when enabling notifications
+      if (value) {
+        Alert.alert(
+          '🔔 Notifications Enabled',
+          'You\'ll now receive notifications from PiggyPal!',
+          [{ text: 'OK' }]
+        );
+      }
+    } catch (error) {
+      // Revert the toggle if permission was denied
+      setNotifications(!value);
+      
+      if (error.message.includes('permissions required')) {
+        Alert.alert(
+          '🚫 Permission Required',
+          'PiggyPal needs notification permissions to send you reminders. Please enable them in your device settings.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { 
+              text: 'Open Settings', 
+              onPress: () => {
+                // This would open device settings if we had Linking configured
+                Alert.alert('Settings', 'Please go to Settings > Notifications > PiggyPal to enable notifications.');
+              }
+            }
+          ]
+        );
+      } else {
+        Alert.alert('Error', 'Failed to update notification settings. Please try again.');
+      }
     }
   };
 
   const toggleDailyReminder = async (value) => {
-    setDailyReminder(value);
-    await notificationService.updateNotificationSettings({ 
-      dailyReminder: value,
-      reminderTime: reminderTime 
-    });
-    
-    // Sync all notification settings
-    const result = await syncService.saveNotificationSettings({
-      enabled: notifications,
-      dailyReminder: value,
-      reminderTime: reminderTime
-    });
-    
-    if (!result.success) {
-      Alert.alert('Settings Saved Locally', 'Notification settings will sync when you\'re back online.');
-    }
-    
-    if (value) {
-      Alert.alert(
-        '⏰ Daily Reminder Set!',
-        `You'll receive reminders at ${formatTime(reminderTime)} every day.`,
-        [{ text: 'OK' }]
-      );
+    try {
+      setDailyReminder(value);
+      await notificationService.updateNotificationSettings({ 
+        dailyReminder: value,
+        reminderTime: reminderTime 
+      });
+      
+      // Sync all notification settings
+      const result = await syncService.saveNotificationSettings({
+        enabled: notifications,
+        dailyReminder: value,
+        reminderTime: reminderTime
+      });
+      
+      if (!result.success) {
+        Alert.alert('Settings Saved Locally', 'Notification settings will sync when you\'re back online.');
+      }
+      
+      if (value) {
+        Alert.alert(
+          '⏰ Daily Reminder Set!',
+          `You'll receive reminders at ${formatTime(reminderTime)} every day.`,
+          [{ text: 'OK' }]
+        );
+      }
+    } catch (error) {
+      // Revert the toggle if permission was denied
+      setDailyReminder(!value);
+      
+      if (error.message.includes('permissions required')) {
+        Alert.alert(
+          '🚫 Permission Required',
+          'PiggyPal needs notification permissions to send you daily reminders. Please enable them in your device settings.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { 
+              text: 'Open Settings', 
+              onPress: () => {
+                Alert.alert('Settings', 'Please go to Settings > Notifications > PiggyPal to enable notifications.');
+              }
+            }
+          ]
+        );
+      } else {
+        Alert.alert('Error', 'Failed to set daily reminder. Please try again.');
+      }
     }
   };
 
@@ -617,12 +674,17 @@ export default function SettingsScreen({ navigation }) {
               await AsyncStorage.removeItem('currentUserName');
               await AsyncStorage.removeItem('currentUserPhoto');
               
+              // Clear all user-related data
+              await AsyncStorage.removeItem('expenses');
+              await AsyncStorage.removeItem('achievements');
+              await AsyncStorage.removeItem('settings');
+              
               // Sign out from Firebase (if using Firebase auth)
               if (auth.currentUser) {
                 await signOut(auth);
               }
               
-              // Navigate back to login screen
+              // Navigate back to login screen and reset stack
               navigation.dispatch(
                 CommonActions.reset({
                   index: 0,
@@ -630,6 +692,7 @@ export default function SettingsScreen({ navigation }) {
                 })
               );
             } catch (error) {
+              console.log('Logout error:', error);
               Alert.alert('Error', 'Failed to logout. Please try again.');
             }
           },
@@ -753,6 +816,7 @@ export default function SettingsScreen({ navigation }) {
           <TouchableOpacity 
             onPress={() => syncService.manualSync()}
             style={styles.syncButton}
+            activeOpacity={0.7}
           >
             <Text style={styles.syncButtonText}>Sync Now</Text>
           </TouchableOpacity>
@@ -761,7 +825,7 @@ export default function SettingsScreen({ navigation }) {
 
       <ScrollView style={styles.scrollView}>
       <View style={styles.profileCard}>
-        <TouchableOpacity onPress={selectProfilePhoto} style={styles.profilePhotoContainer}>
+        <TouchableOpacity onPress={selectProfilePhoto} style={styles.profilePhotoContainer} activeOpacity={0.7}>
           <Text style={styles.profilePhoto}>{profilePhoto || '👤'}</Text>
           <Text style={styles.photoHint}>Tap to change</Text>
         </TouchableOpacity>
@@ -951,7 +1015,7 @@ export default function SettingsScreen({ navigation }) {
           onPress={() =>
             Alert.alert(
               'About PiggyPal 🐷',
-              'PiggyPal helps kids learn about saving and spending money!\n\nVersion 1.0.0'
+              'PiggyPal is your friendly companion for learning smart money habits!\n\n💰 What PiggyPal does:\n• Track your spending and savings\n• Set and achieve savings goals\n• Learn the difference between needs and wants\n• Earn achievements for good money habits\n• Visualize your progress with charts\n• Get gentle reminders to track expenses\n\n🎯 Perfect for kids, teens, and anyone starting their financial journey!\n\n🔒 Your data is safe with offline support and cloud sync across devices.\n\nVersion 1.0.0\nMade with ❤️ for learning'
             )
           }
         >
@@ -1228,6 +1292,10 @@ export default function SettingsScreen({ navigation }) {
           </View>
         </TouchableWithoutFeedback>
       </Modal>
+
+
+
+
     </View>
   );
 }
@@ -1422,13 +1490,29 @@ const styles = StyleSheet.create({
     color: colors.textLight,
     textAlign: 'center',
   },
-  cancelButton: {
-    backgroundColor: colors.textLight,
-    paddingVertical: 12,
-    paddingHorizontal: 30,
-    borderRadius: 25,
+  modalCancelButton: {
+    flex: 1,
+    backgroundColor: colors.lightGray,
+    paddingVertical: 14,
+    borderRadius: 12,
     alignItems: 'center',
-    marginTop: 10,
+  },
+  modalCancelButtonText: {
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  modalDeleteButton: {
+    flex: 1,
+    backgroundColor: '#FFEBEE',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  modalDeleteButtonText: {
+    color: '#C62828',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
   cancelButtonText: {
     color: 'white',
@@ -1659,6 +1743,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginTop: 10,
+  },
+  buttonContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
   },
   profileModalButton: {
     flex: 1,

@@ -4,11 +4,14 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { useFocusEffect } from '@react-navigation/native';
 import { useCallback, useEffect, useState } from 'react';
 import {
+    ActivityIndicator,
     Alert,
+    AppState,
     FlatList,
     Keyboard,
     Modal,
     Platform,
+    Share,
     StyleSheet,
     Text,
     TextInput,
@@ -47,6 +50,11 @@ export default function ExpenseScreen() {
   
   // Delete confirmation modal state
   const [deleteExpense, setDeleteExpense] = useState(null);
+  
+  // Loading states
+  const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
 
   // No animation values needed
 
@@ -94,6 +102,37 @@ export default function ExpenseScreen() {
       setHeaderMessage(randomMessage);
     }, [])
   );
+
+  // Handle screen blur/navigation away while modal is open
+  useFocusEffect(
+    useCallback(() => {
+      // Return cleanup function that runs when screen loses focus
+      return () => {
+        // If modal is open and has unsaved data, save as draft
+        if (modalVisible && (title || amount)) {
+          saveDraft();
+        }
+      };
+    }, [modalVisible, title, amount])
+  );
+
+  // Handle app going to background while modal is open
+  useEffect(() => {
+    const handleAppStateChange = (nextAppState) => {
+      if (nextAppState === 'background' || nextAppState === 'inactive') {
+        // If modal is open and has unsaved data, save as draft
+        if (modalVisible && (title || amount)) {
+          saveDraft();
+        }
+      }
+    };
+
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+
+    return () => {
+      subscription?.remove();
+    };
+  }, [modalVisible, title, amount]);
 
   const loadCurrentUser = async () => {
     try {
@@ -302,8 +341,43 @@ export default function ExpenseScreen() {
     );
   };
 
-  // Export data as text (simple format for kids)
-  const exportDataBeforeDelete = () => {
+  // Export/Share data function
+  const exportData = async () => {
+    if (expenses.length === 0) {
+      Alert.alert('No Data', 'You don\'t have any data to export!');
+      return;
+    }
+
+    const totalSavings = expenses
+      .filter(e => e.type === 'saving')
+      .reduce((sum, e) => sum + e.amount, 0);
+    const totalSpending = expenses
+      .filter(e => e.type === 'spending')
+      .reduce((sum, e) => sum + e.amount, 0);
+
+    // Create detailed data export
+    const summary = `📊 PiggyPal Summary\n\n` +
+      `💰 Total Savings: $${totalSavings.toFixed(2)}\n` +
+      `💸 Total Spending: $${totalSpending.toFixed(2)}\n` +
+      `📝 Total Records: ${expenses.length}\n\n` +
+      `All Entries:\n` +
+      expenses.map((e, index) => 
+        `${index + 1}. ${e.type === 'saving' ? '💰' : '💸'} ${e.title}: $${e.amount.toFixed(2)} (${new Date(e.date).toLocaleDateString()})`
+      ).join('\n');
+
+    try {
+      await Share.share({
+        message: summary,
+        title: '📊 PiggyPal Data Export'
+      });
+    } catch (error) {
+      console.log('Error sharing data:', error);
+      Alert.alert('Error', 'Could not share data. Please try again.');
+    }
+  };
+
+  // Export data before delete (used in bulk delete)
+  const exportDataBeforeDelete = async () => {
     if (expenses.length === 0) {
       Alert.alert('No Data', 'You don\'t have any data to export!');
       return;
@@ -325,24 +399,41 @@ export default function ExpenseScreen() {
         `${e.type === 'saving' ? '💰' : '💸'} ${e.title}: $${e.amount}`
       ).join('\n');
 
-    Alert.alert(
-      '📤 Your Data Summary',
-      summary,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete All Now',
-          style: 'destructive',
-          onPress: async () => {
-            const user = await AsyncStorage.getItem('currentUser');
-            if (!user) return;
-            await AsyncStorage.setItem(`expenses_${user}`, JSON.stringify([]));
-            setExpenses([]);
-            Alert.alert('✅ Deleted!', 'All records have been deleted.');
+    try {
+      await Share.share({
+        message: summary,
+        title: '📊 PiggyPal Data Export'
+      });
+    } catch (error) {
+      console.log('Error sharing data:', error);
+      Alert.alert('Error', 'Could not share data. Please try again.');
+    }
+
+    // After sharing, ask if they want to delete all data
+    setTimeout(() => {
+      Alert.alert(
+        '🗑️ Delete All Data?',
+        'Now that you\'ve exported your data, would you like to delete all records?',
+        [
+          { text: 'Keep Data', style: 'cancel' },
+          {
+            text: 'Delete All',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                const user = await AsyncStorage.getItem('currentUser');
+                if (!user) return;
+                await AsyncStorage.setItem(`expenses_${user}`, JSON.stringify([]));
+                setExpenses([]);
+                Alert.alert('✅ Deleted!', 'All records have been deleted.');
+              } catch (error) {
+                Alert.alert('Error', 'Failed to delete records. Please try again.');
+              }
+            }
           }
-        }
-      ]
-    );
+        ]
+      );
+    }, 500); // Small delay to let sharing complete
   };
 
   // No animation functions needed
@@ -414,6 +505,7 @@ export default function ExpenseScreen() {
       return;
     }
 
+    setIsSaving(true);
     try {
       const user = await AsyncStorage.getItem('currentUser');
       if (!user) {
@@ -466,6 +558,8 @@ export default function ExpenseScreen() {
     } catch (error) {
       Alert.alert('Error', 'Something went wrong! 😅');
       console.error(error);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -476,6 +570,7 @@ export default function ExpenseScreen() {
   const confirmDelete = async () => {
     if (!deleteExpense) return;
     
+    setIsDeleting(true);
     try {
       const user = await AsyncStorage.getItem('currentUser');
       if (!user) {
@@ -493,9 +588,10 @@ export default function ExpenseScreen() {
       }
     } catch (error) {
       Alert.alert('Error', 'Failed to delete! 😅');
+    } finally {
+      setIsDeleting(false);
+      setDeleteExpense(null);
     }
-    
-    setDeleteExpense(null);
   };
 
   const renderExpenseItem = ({ item }) => (
@@ -525,12 +621,14 @@ export default function ExpenseScreen() {
             <TouchableOpacity
               style={styles.iconButton}
               onPress={() => openEditModal(item)}
+              activeOpacity={0.7}
             >
               <Text style={styles.editIcon}>✏️</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.iconButton}
               onPress={() => handleDelete(item)}
+              activeOpacity={0.7}
             >
               <Text style={styles.deleteIcon}>🗑️</Text>
             </TouchableOpacity>
@@ -599,7 +697,7 @@ export default function ExpenseScreen() {
         visible={modalVisible}
         onRequestClose={handleCloseModal}
       >
-        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+        <TouchableWithoutFeedback onPress={handleCloseModal}>
           <View style={styles.modalOverlay}>
             <TouchableWithoutFeedback onPress={() => {}}>
               <View style={styles.modalContent}>
@@ -628,6 +726,7 @@ export default function ExpenseScreen() {
             <TouchableOpacity 
               style={styles.dateButton}
               onPress={() => setShowDatePicker(true)}
+              activeOpacity={0.7}
             >
               <Text style={styles.dateButtonText}>
                 📅 {selectedDate.toLocaleDateString()}
@@ -660,6 +759,7 @@ export default function ExpenseScreen() {
                   { backgroundColor: type === 'spending' ? colors.spending : colors.white },
                 ]}
                 onPress={() => setType('spending')}
+                activeOpacity={0.7}
               >
                 <Text
                   style={[
@@ -678,6 +778,7 @@ export default function ExpenseScreen() {
                   { backgroundColor: type === 'saving' ? colors.saving : colors.white },
                 ]}
                 onPress={() => setType('saving')}
+                activeOpacity={0.7}
               >
                 <Text
                   style={[
@@ -694,14 +795,29 @@ export default function ExpenseScreen() {
               <TouchableOpacity
                 style={styles.cancelButton}
                 onPress={handleCloseModal}
+                activeOpacity={0.7}
               >
                 <Text style={styles.cancelButtonText}>Cancel</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
-                <Text style={styles.saveButtonText}>
-                  {editingExpense ? 'Update ✅' : 'Save ✅'}
-                </Text>
+              <TouchableOpacity 
+                style={[styles.saveButton, isSaving && styles.saveButtonDisabled]} 
+                onPress={handleSave}
+                disabled={isSaving}
+                activeOpacity={0.7}
+              >
+                {isSaving ? (
+                  <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="small" color="white" style={styles.loadingSpinner} />
+                    <Text style={styles.saveButtonText}>
+                      {editingExpense ? 'Updating...' : 'Saving...'}
+                    </Text>
+                  </View>
+                ) : (
+                  <Text style={styles.saveButtonText}>
+                    {editingExpense ? 'Update ✅' : 'Save ✅'}
+                  </Text>
+                )}
               </TouchableOpacity>
             </View>
               </View>
@@ -732,15 +848,25 @@ export default function ExpenseScreen() {
                   <TouchableOpacity
                     style={styles.deleteModalCancelButton}
                     onPress={() => setDeleteExpense(null)}
+                    activeOpacity={0.7}
                   >
                     <Text style={styles.deleteModalCancelText}>Cancel</Text>
                   </TouchableOpacity>
                   
                   <TouchableOpacity
-                    style={styles.deleteModalDeleteButton}
+                    style={[styles.deleteModalDeleteButton, isDeleting && styles.deleteButtonDisabled]}
                     onPress={confirmDelete}
+                    disabled={isDeleting}
+                    activeOpacity={0.7}
                   >
-                    <Text style={styles.deleteModalDeleteText}>Delete</Text>
+                    {isDeleting ? (
+                      <View style={styles.loadingContainer}>
+                        <ActivityIndicator size="small" color="white" style={styles.loadingSpinner} />
+                        <Text style={styles.deleteModalDeleteText}>Deleting...</Text>
+                      </View>
+                    ) : (
+                      <Text style={styles.deleteModalDeleteText}>Delete</Text>
+                    )}
                   </TouchableOpacity>
                 </View>
               </View>
@@ -1085,6 +1211,17 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 16,
   },
+  saveButtonDisabled: {
+    opacity: 0.6,
+  },
+  loadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingSpinner: {
+    marginRight: 8,
+  },
   deleteModalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
@@ -1146,6 +1283,9 @@ const styles = StyleSheet.create({
     color: '#C62828',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  deleteButtonDisabled: {
+    opacity: 0.6,
   },
   fabShadowContainer: {
     position: 'absolute',

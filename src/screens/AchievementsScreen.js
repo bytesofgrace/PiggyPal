@@ -2,12 +2,14 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useState } from 'react';
 import {
-    Alert,
-    SectionList,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View
+  Alert,
+  Modal,
+  SectionList,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+  TouchableWithoutFeedback
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import achievementService from '../utils/achievementService';
@@ -17,6 +19,8 @@ export default function AchievementsScreen({ navigation }) {
   const [sections, setSections] = useState([]);
   const [stats, setStats] = useState({ total: 0, weekly: 0, monthly: 0, totalSaved: 0 });
   const [user, setUser] = useState(null);
+  const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
+  const [showDeleteOldModal, setShowDeleteOldModal] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -153,25 +157,7 @@ export default function AchievementsScreen({ navigation }) {
   };
 
   const handleDeleteOld = () => {
-    Alert.alert(
-      '🗑️ Delete Old Achievements?',
-      'Choose how far back to keep your achievement history:',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: '30 Days',
-          onPress: () => deleteOldAchievements('30')
-        },
-        {
-          text: '90 Days',
-          onPress: () => deleteOldAchievements('90')
-        },
-        {
-          text: '6 Months',
-          onPress: () => deleteOldAchievements('180')
-        }
-      ]
-    );
+    setShowDeleteOldModal(true);
   };
 
   const deleteOldAchievements = async (days) => {
@@ -189,26 +175,8 @@ export default function AchievementsScreen({ navigation }) {
   };
 
   const handleDeleteAll = () => {
-    Alert.alert(
-      '🗑️ Delete All Achievements?',
-      'This will permanently delete your entire achievement history. This cannot be undone!',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete All',
-          style: 'destructive',
-          onPress: async () => {
-            const result = await achievementService.deleteAllAchievements(user);
-            if (result.success) {
-              await loadAchievements();
-              Alert.alert('✅ Deleted!', 'All achievements have been cleared.');
-            } else {
-              Alert.alert('Error', 'Failed to delete achievements.');
-            }
-          }
-        }
-      ]
-    );
+    // Use a custom centered modal for consistent positioning across platforms
+    setShowDeleteAllModal(true);
   };
 
   const formatDate = (dateString) => {
@@ -295,6 +263,111 @@ export default function AchievementsScreen({ navigation }) {
       )}
 
       {/* Achievements List */}
+      {/* Delete All confirmation modal */}
+      <Modal
+        visible={showDeleteAllModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowDeleteAllModal(false)}
+      >
+        <TouchableWithoutFeedback onPress={() => setShowDeleteAllModal(false)}>
+          <View style={styles.modalOverlay}>
+            <TouchableWithoutFeedback onPress={() => {}}>
+              <View style={styles.modalContainer}>
+                <View style={styles.modalHeader}>
+                  <Text style={styles.modalTitle}>🗑️ Delete All Achievements?</Text>
+                  <Text style={styles.modalSubtitle}>This will permanently delete your entire achievement history. This cannot be undone!</Text>
+                </View>
+                
+                <View style={styles.buttonContainer}>
+                  <TouchableOpacity
+                    style={styles.cancelButton}
+                    onPress={() => setShowDeleteAllModal(false)}
+                  >
+                    <Text style={styles.cancelButtonText}>Cancel</Text>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity
+                    style={styles.deleteButton}
+                    onPress={async () => {
+                      const result = await achievementService.deleteAllAchievements(user);
+                      setShowDeleteAllModal(false);
+                      if (result.success) {
+                        await loadAchievements();
+                        Alert.alert('✅ Deleted!', 'All achievements have been cleared.');
+                      } else {
+                        Alert.alert('Error', 'Failed to delete achievements.');
+                      }
+                    }}
+                  >
+                    <Text style={styles.deleteButtonText}>Delete All</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+
+      {/* Delete Old confirmation modal */}
+      <Modal
+        visible={showDeleteOldModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowDeleteOldModal(false)}
+      >
+        <TouchableWithoutFeedback onPress={() => setShowDeleteOldModal(false)}>
+          <View style={styles.modalOverlay}>
+            <TouchableWithoutFeedback onPress={() => {}}>
+              <View style={styles.modalContainer}>
+                <View style={styles.modalHeader}>
+                  <Text style={styles.modalTitle}>🗑️ Delete Old Achievements?</Text>
+                  <Text style={styles.modalSubtitle}>Choose how far back to keep your achievement history:</Text>
+                </View>
+                
+                <View style={styles.optionsContainer}>
+                  <TouchableOpacity
+                    style={styles.optionButton}
+                    onPress={async () => {
+                      setShowDeleteOldModal(false);
+                      await deleteOldAchievements('30');
+                    }}
+                  >
+                    <Text style={styles.optionButtonText}>30 Days</Text>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity
+                    style={styles.optionButton}
+                    onPress={async () => {
+                      setShowDeleteOldModal(false);
+                      await deleteOldAchievements('90');
+                    }}
+                  >
+                    <Text style={styles.optionButtonText}>90 Days</Text>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity
+                    style={styles.optionButton}
+                    onPress={async () => {
+                      setShowDeleteOldModal(false);
+                      await deleteOldAchievements('180');
+                    }}
+                  >
+                    <Text style={styles.optionButtonText}>6 Months</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <TouchableOpacity
+                  style={styles.fullWidthCancelButton}
+                  onPress={() => setShowDeleteOldModal(false)}
+                >
+                  <Text style={styles.cancelButtonText}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
       {sections.length === 0 ? (
         <View style={styles.emptyState}>
           <Text style={styles.emptyEmoji}>🎯</Text>
@@ -487,5 +560,88 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: colors.primary,
     letterSpacing: 0.5,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContainer: {
+    backgroundColor: 'white',
+    margin: 20,
+    borderRadius: 20,
+    padding: 20,
+    width: '90%',
+    maxWidth: 400,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  modalHeader: {
+    marginBottom: 20,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: colors.text,
+    marginBottom: 8,
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: colors.textLight,
+    lineHeight: 20,
+  },
+  buttonContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  cancelButton: {
+    flex: 1,
+    backgroundColor: colors.lightGray,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  cancelButtonText: {
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  deleteButton: {
+    flex: 1,
+    backgroundColor: '#FFEBEE',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  deleteButtonText: {
+    color: '#C62828',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  optionsContainer: {
+    gap: 10,
+    marginBottom: 16,
+  },
+  optionButton: {
+    backgroundColor: colors.primary,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  optionButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  fullWidthCancelButton: {
+    backgroundColor: colors.lightGray,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
   },
 });

@@ -65,6 +65,34 @@ class NotificationService {
     }
   }
 
+  // Check if notification permissions are currently granted
+  async checkPermissions() {
+    try {
+      const { status } = await Notifications.getPermissionsAsync();
+      return status === 'granted';
+    } catch (error) {
+      console.error('Error checking notification permissions:', error);
+      return false;
+    }
+  }
+
+  // Re-request permissions if they were previously denied
+  async reRequestPermissions() {
+    try {
+      const { status } = await Notifications.requestPermissionsAsync();
+      if (status === 'granted') {
+        console.log('Notification permissions re-granted');
+        return true;
+      } else {
+        console.log('Notification permissions still denied');
+        return false;
+      }
+    } catch (error) {
+      console.error('Error re-requesting notification permissions:', error);
+      return false;
+    }
+  }
+
   // Register for push notifications
   async registerForPushNotifications() {
     try {
@@ -395,10 +423,32 @@ class NotificationService {
   async updateNotificationSettings(settings) {
     try {
       if (settings.enabled !== undefined) {
+        // If enabling notifications, check permissions first
+        if (settings.enabled === true) {
+          const hasPermissions = await this.checkPermissions();
+          if (!hasPermissions) {
+            const granted = await this.reRequestPermissions();
+            if (!granted) {
+              throw new Error('Notification permissions required to enable notifications');
+            }
+          }
+        }
+        
         await AsyncStorage.setItem('notifications_enabled', settings.enabled.toString());
       }
       
       if (settings.dailyReminder !== undefined) {
+        // If enabling daily reminders, ensure we have permissions
+        if (settings.dailyReminder === true) {
+          const hasPermissions = await this.checkPermissions();
+          if (!hasPermissions) {
+            const granted = await this.reRequestPermissions();
+            if (!granted) {
+              throw new Error('Notification permissions required to enable daily reminders');
+            }
+          }
+        }
+        
         await AsyncStorage.setItem('daily_reminder_enabled', settings.dailyReminder.toString());
         // Update daily reminder schedule
         await this.scheduleDailyReminder(settings.dailyReminder, settings.reminderTime || '19:00');
@@ -416,6 +466,7 @@ class NotificationService {
       console.log('Notification settings updated:', settings);
     } catch (error) {
       console.error('Error updating notification settings:', error);
+      throw error; // Re-throw to let the UI handle the error
     }
   }
 
