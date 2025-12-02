@@ -25,7 +25,12 @@ export default function LoginScreen({ navigation }) {
         const userData = await AsyncStorage.getItem(`user_${email}`);
         if (userData) {
           const user = JSON.parse(userData);
-          if (user.password === password) {
+          // Handle both dev and production password formats
+          const isValidPassword = user.password === password || 
+                                  user.password === `hashed_${password}` ||
+                                  (!__DEV__ && user.password.startsWith('secure_') && user.password.includes(btoa(password)));
+          
+          if (isValidPassword) {
             // Save current user email and name
             await AsyncStorage.setItem('currentUser', email);
             await AsyncStorage.setItem('currentUserName', user.name || 'Friend');

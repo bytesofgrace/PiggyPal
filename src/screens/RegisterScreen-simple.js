@@ -32,11 +32,15 @@ export default function RegisterScreen({ navigation }) {
           }
           
           // Save user data
+          // ⚠️ SECURITY WARNING: In production, passwords MUST be hashed!
+          // TODO: Implement bcrypt: npm install react-native-bcrypt
+          // const hashedPassword = await bcrypt.hash(password, 10);
           const userData = {
             name: name,
             email: email,
-            password: password, // In real app, this should be hashed!
-            createdAt: new Date().toISOString()
+            password: __DEV__ ? password : `secure_${btoa(password)}_${Date.now()}`, // Basic obfuscation for demo
+            createdAt: new Date().toISOString(),
+            isProduction: !__DEV__
           };
           
           await AsyncStorage.setItem(`user_${email}`, JSON.stringify(userData));

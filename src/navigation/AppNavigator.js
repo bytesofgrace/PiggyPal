@@ -94,7 +94,7 @@ export default function AppNavigator() {
       const loggedInUser = await AsyncStorage.getItem('currentUser');
       setUser(loggedInUser);
     } catch (error) {
-      console.log('Error checking login status:', error);
+      if (__DEV__) console.log('Error checking login status:', error);
     } finally {
       setIsLoading(false);
     }
