@@ -2,11 +2,13 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useFocusEffect } from '@react-navigation/native';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import {
     ActivityIndicator,
     Alert,
+    Animated,
     AppState,
+    Dimensions,
     FlatList,
     Keyboard,
     Modal,
@@ -22,6 +24,7 @@ import {
 import ConfettiCannon from 'react-native-confetti-cannon';
 import { colors } from '../utils/colors';
 import syncService from '../utils/syncService';
+import CustomAlert, { showCustomAlert } from '../components/CustomAlert';
 
 // Motivational messages for the header
 const motivationalMessages = [
@@ -48,6 +51,8 @@ export default function ExpenseScreen() {
   // Confetti state
   const [showConfetti, setShowConfetti] = useState(false);
   
+
+  
   // Delete confirmation modal state
   const [deleteExpense, setDeleteExpense] = useState(null);
   
@@ -55,6 +60,7 @@ export default function ExpenseScreen() {
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  const [showUnsavedModal, setShowUnsavedModal] = useState(false);
 
   // No animation values needed
 
@@ -62,6 +68,7 @@ export default function ExpenseScreen() {
     const initializeData = async () => {
       await loadCurrentUser();
       await loadExpenses();
+      await clearBadDrafts(); // Clear any empty drafts first
       await loadDraft(); // Load any saved draft
       await autoDeleteOldExpenses(); // Auto-delete old entries based on settings
       
@@ -89,8 +96,11 @@ export default function ExpenseScreen() {
 
   // Auto-save draft whenever form fields change
   useEffect(() => {
-    // Only save if there's actual content and modal is visible
-    if (modalVisible && (title || amount)) {
+    // Only save if there's actual meaningful content and modal is visible
+    const hasTitle = title && title.trim().length > 0;
+    const hasAmount = amount && amount.trim().length > 0;
+    
+    if (modalVisible && (hasTitle || hasAmount)) {
       saveDraft();
     }
   }, [title, amount, type, selectedDate, modalVisible]);
@@ -108,8 +118,10 @@ export default function ExpenseScreen() {
     useCallback(() => {
       // Return cleanup function that runs when screen loses focus
       return () => {
-        // If modal is open and has unsaved data, save as draft
-        if (modalVisible && (title || amount)) {
+        // If modal is open and has unsaved meaningful data, save as draft
+        const hasTitle = title && title.trim().length > 0;
+        const hasAmount = amount && amount.trim().length > 0;
+        if (modalVisible && (hasTitle || hasAmount)) {
           saveDraft();
         }
       };
@@ -120,8 +132,10 @@ export default function ExpenseScreen() {
   useEffect(() => {
     const handleAppStateChange = (nextAppState) => {
       if (nextAppState === 'background' || nextAppState === 'inactive') {
-        // If modal is open and has unsaved data, save as draft
-        if (modalVisible && (title || amount)) {
+        // If modal is open and has unsaved meaningful data, save as draft
+        const hasTitle = title && title.trim().length > 0;
+        const hasAmount = amount && amount.trim().length > 0;
+        if (modalVisible && (hasTitle || hasAmount)) {
           saveDraft();
         }
       }
@@ -194,18 +208,40 @@ export default function ExpenseScreen() {
         // Only restore draft if it's less than 24 hours old
         const hoursSinceDraft = (Date.now() - draft.timestamp) / (1000 * 60 * 60);
         if (hoursSinceDraft < 24) {
+          // Check if draft has meaningful content before restoring
+          const hasTitle = draft.title && typeof draft.title === 'string' && draft.title.trim().length > 0;
+          const hasAmount = draft.amount && typeof draft.amount === 'string' && draft.amount.trim().length > 0;
+          
           setTitle(draft.title || '');
           setAmount(draft.amount || '');
           setType(draft.type || 'spending');
           setSelectedDate(draft.selectedDate ? new Date(draft.selectedDate) : new Date());
           
-          // If there was a draft, show alert
-          if (draft.title || draft.amount) {
-            Alert.alert(
-              'Draft Restored',
-              'We found an unsaved entry and restored it for you!',
-              [{ text: 'OK' }]
+          // Only show alert if draft has meaningful content
+          if (hasTitle || hasAmount) {
+            const draftPreview = `${draft.title || 'Untitled'} - $${draft.amount || '0'}`;
+            showCustomAlert(
+              'Draft Found',
+              `We found an unsaved ${draft.type || 'entry'}: "${draftPreview}". Would you like to keep it or start fresh?`,
+              [
+                { 
+                  text: 'Start Fresh', 
+                  onPress: async () => {
+                    await clearDraft();
+                    setTitle('');
+                    setAmount('');
+                    setType('spending');
+                    setSelectedDate(new Date());
+                  }
+                },
+                { 
+                  text: 'Keep Draft', 
+                  onPress: () => console.log('Draft kept') 
+                }
+              ]
             );
+          } else {
+            await clearDraft(); // Clear the empty draft immediately
           }
         } else {
           // Clear old draft
@@ -225,6 +261,29 @@ export default function ExpenseScreen() {
       await AsyncStorage.removeItem(`expense_draft_${user}`);
     } catch (error) {
       console.log('Error clearing draft:', error);
+    }
+  };
+
+  const clearBadDrafts = async () => {
+    try {
+      const user = await AsyncStorage.getItem('currentUser');
+      if (!user) return;
+
+      const draftData = await AsyncStorage.getItem(`expense_draft_${user}`);
+      
+      if (draftData) {
+        const draft = JSON.parse(draftData);
+        
+        const hasTitle = draft.title && typeof draft.title === 'string' && draft.title.trim().length > 0;
+        const hasAmount = draft.amount && typeof draft.amount === 'string' && draft.amount.trim().length > 0;
+        
+        // Clear draft if it has no meaningful content
+        if (!hasTitle && !hasAmount) {
+          await clearDraft();
+        }
+      }
+    } catch (error) {
+      console.log('Error checking drafts:', error);
     }
   };
 
@@ -306,7 +365,7 @@ export default function ExpenseScreen() {
 
   // Bulk delete all expenses
   const handleBulkDelete = () => {
-    Alert.alert(
+    showCustomAlert(
       '🗑️ Delete All Data?',
       'This will permanently delete ALL your savings and spending records. This action cannot be undone!',
       [
@@ -327,13 +386,12 @@ export default function ExpenseScreen() {
               await AsyncStorage.setItem(`expenses_${user}`, JSON.stringify([]));
               setExpenses([]);
               
-              Alert.alert(
+              showCustomAlert(
                 '✅ All Clear!',
-                'All your expense records have been deleted.',
-                [{ text: 'OK' }]
+                'All your expense records have been deleted.'
               );
             } catch (error) {
-              Alert.alert('Error', 'Failed to delete records. Please try again.');
+              showCustomAlert('Error', 'Failed to delete records. Please try again.');
             }
           }
         }
@@ -344,7 +402,7 @@ export default function ExpenseScreen() {
   // Export/Share data function
   const exportData = async () => {
     if (expenses.length === 0) {
-      Alert.alert('No Data', 'You don\'t have any data to export!');
+      showCustomAlert('No Data', 'You don\'t have any data to export!');
       return;
     }
 
@@ -372,17 +430,21 @@ export default function ExpenseScreen() {
       });
     } catch (error) {
       console.log('Error sharing data:', error);
-      Alert.alert('Error', 'Could not share data. Please try again.');
+      showCustomAlert('Error', 'Could not share data. Please try again.');
     }
   };
 
   // Export data before delete (used in bulk delete)
   const exportDataBeforeDelete = async () => {
+    console.log('🔄 Export function called');
+    
     if (expenses.length === 0) {
-      Alert.alert('No Data', 'You don\'t have any data to export!');
+      showCustomAlert('No Data', 'You don\'t have any data to export!');
       return;
     }
 
+    console.log('📊 Preparing export data...');
+    
     const totalSavings = expenses
       .filter(e => e.type === 'saving')
       .reduce((sum, e) => sum + e.amount, 0);
@@ -400,18 +462,52 @@ export default function ExpenseScreen() {
       ).join('\n');
 
     try {
-      await Share.share({
+      console.log('📤 Attempting to share data...');
+      
+      // Set a timeout to prevent hanging
+      const sharePromise = Share.share({
         message: summary,
         title: '📊 PiggyPal Data Export'
       });
+      
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Share timeout')), 5000);
+      });
+      
+      const result = await Promise.race([sharePromise, timeoutPromise]);
+      
+      console.log('✅ Share completed:', result);
+      
+      // Show success message regardless of result
+      showCustomAlert(
+        '✅ Export Ready!',
+        'Your data export has been prepared. You can now choose to keep or delete your records.',
+        [{ text: 'OK', onPress: () => console.log('Export acknowledged') }]
+      );
+      
     } catch (error) {
-      console.log('Error sharing data:', error);
-      Alert.alert('Error', 'Could not share data. Please try again.');
+      console.log('❌ Share failed or timed out, showing data directly:', error);
+      
+      // Fallback: Show the data in an alert for manual copying
+      showCustomAlert(
+        '📊 Your Export Data',
+        summary,
+        [
+          { text: 'Copy Text', onPress: () => {
+            // Try to copy to clipboard if available
+            if (Platform.OS === 'web') {
+              navigator.clipboard?.writeText(summary);
+            }
+            showCustomAlert('📋 Ready!', 'Data displayed above. You can manually copy this information.');
+          }},
+          { text: 'OK', onPress: () => console.log('Data shown to user') }
+        ]
+      );
     }
 
     // After sharing, ask if they want to delete all data
     setTimeout(() => {
-      Alert.alert(
+      showCustomAlert(
         '🗑️ Delete All Data?',
         'Now that you\'ve exported your data, would you like to delete all records?',
         [
@@ -425,9 +521,9 @@ export default function ExpenseScreen() {
                 if (!user) return;
                 await AsyncStorage.setItem(`expenses_${user}`, JSON.stringify([]));
                 setExpenses([]);
-                Alert.alert('✅ Deleted!', 'All records have been deleted.');
+                showCustomAlert('✅ Deleted!', 'All records have been deleted.');
               } catch (error) {
-                Alert.alert('Error', 'Failed to delete records. Please try again.');
+                showCustomAlert('Error', 'Failed to delete records. Please try again.');
               }
             }
           }
@@ -436,7 +532,7 @@ export default function ExpenseScreen() {
     }, 500); // Small delay to let sharing complete
   };
 
-  // No animation functions needed
+
 
   const openAddModal = () => {
     setEditingExpense(null);
@@ -448,40 +544,31 @@ export default function ExpenseScreen() {
   };
 
   const handleCloseModal = () => {
-    // If there's unsaved data, ask user
-    if (title || amount) {
-      Alert.alert(
-        'Unsaved Changes',
-        'Do you want to save this as a draft?',
-        [
-          {
-            text: 'Discard',
-            style: 'destructive',
-            onPress: async () => {
-              await clearDraft();
-              setTitle('');
-              setAmount('');
-              setType('spending');
-              setEditingExpense(null);
-              setModalVisible(false);
-            }
-          },
-          {
-            text: 'Keep Draft',
-            onPress: () => {
-              setModalVisible(false);
-              // Draft is already saved via useEffect
-            }
-          },
-          {
-            text: 'Cancel',
-            style: 'cancel'
-          }
-        ]
-      );
+    // If there's meaningful unsaved data, ask user
+    const hasTitle = title && title.trim().length > 0;
+    const hasAmount = amount && amount.trim().length > 0;
+    
+    if (hasTitle || hasAmount) {
+      setShowUnsavedModal(true);
     } else {
       setModalVisible(false);
     }
+  };
+
+  const handleDiscardChanges = async () => {
+    await clearDraft();
+    setTitle('');
+    setAmount('');
+    setType('spending');
+    setEditingExpense(null);
+    setShowUnsavedModal(false);
+    setModalVisible(false);
+  };
+
+  const handleKeepDraft = () => {
+    setShowUnsavedModal(false);
+    setModalVisible(false);
+    // Draft is already saved via useEffect
   };
 
   const openEditModal = (expense) => {
@@ -495,13 +582,13 @@ export default function ExpenseScreen() {
 
   const handleSave = async () => {
     if (!title || !amount) {
-      Alert.alert('Oops!', 'Please fill in all fields! 📝');
+      showCustomAlert('Oops!', 'Please fill in all fields! 📝');
       return;
     }
 
     const numAmount = parseFloat(amount);
     if (isNaN(numAmount) || numAmount <= 0) {
-      Alert.alert('Oops!', 'Please enter a valid amount! 💵');
+      showCustomAlert('Oops!', 'Please enter a valid amount! 💵');
       return;
     }
 
@@ -509,7 +596,7 @@ export default function ExpenseScreen() {
     try {
       const user = await AsyncStorage.getItem('currentUser');
       if (!user) {
-        Alert.alert('Error', 'User not found');
+        showCustomAlert('Error', 'User not found');
         return;
       }
 
@@ -545,18 +632,17 @@ export default function ExpenseScreen() {
       } else {
         // Show detailed validation errors if available
         if (result.validationErrors && result.validationErrors.length > 0) {
-          Alert.alert(
+          showCustomAlert(
             'Validation Error',
-            result.validationErrors.join('\n'),
-            [{ text: 'OK' }]
+            result.validationErrors.join('\n')
           );
         } else {
-          Alert.alert('Error', `Failed to save: ${result.error}`);
+          showCustomAlert('Error', `Failed to save: ${result.error}`);
         }
       }
       
     } catch (error) {
-      Alert.alert('Error', 'Something went wrong! 😅');
+      showCustomAlert('Error', 'Something went wrong! 😅');
       console.error(error);
     } finally {
       setIsSaving(false);
@@ -574,7 +660,7 @@ export default function ExpenseScreen() {
     try {
       const user = await AsyncStorage.getItem('currentUser');
       if (!user) {
-        Alert.alert('Error', 'User not found');
+        showCustomAlert('Error', 'User not found');
         setDeleteExpense(null);
         return;
       }
@@ -584,10 +670,10 @@ export default function ExpenseScreen() {
       if (result.success) {
         setExpenses(result.data);
       } else {
-        Alert.alert('Error', `Failed to delete: ${result.error}`);
+        showCustomAlert('Error', `Failed to delete: ${result.error}`);
       }
     } catch (error) {
-      Alert.alert('Error', 'Failed to delete! 😅');
+      showCustomAlert('Error', 'Failed to delete! 😅');
     } finally {
       setIsDeleting(false);
       setDeleteExpense(null);
@@ -639,10 +725,15 @@ export default function ExpenseScreen() {
   );
 
   return (
-    <View style={styles.container}>
+    <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+      <View style={styles.container}>
       <View style={styles.header}>
-        <View style={styles.headerTop}>
-          <Text style={styles.headerTitle}>{headerMessage}</Text>
+        <View style={styles.motivationalCard}>
+          <View style={styles.motivationalCardHeader}>
+            <Text style={styles.motivationalCardEmoji}>🐷</Text>
+            <Text style={styles.motivationalCardTitle}>PiggyPal Says:</Text>
+          </View>
+          <Text style={styles.motivationalCardMessage}>{headerMessage}</Text>
         </View>
       </View>
 
@@ -697,9 +788,9 @@ export default function ExpenseScreen() {
         visible={modalVisible}
         onRequestClose={handleCloseModal}
       >
-        <TouchableWithoutFeedback onPress={handleCloseModal}>
+        <TouchableWithoutFeedback onPress={() => { Keyboard.dismiss(); handleCloseModal(); }}>
           <View style={styles.modalOverlay}>
-            <TouchableWithoutFeedback onPress={() => {}}>
+            <TouchableWithoutFeedback onPress={() => Keyboard.dismiss()}>
               <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>
               {editingExpense ? '✏️ Edit Entry' : '➕ Add New Entry'}
@@ -833,9 +924,9 @@ export default function ExpenseScreen() {
         animationType="fade"
         onRequestClose={() => setDeleteExpense(null)}
       >
-        <TouchableWithoutFeedback onPress={() => setDeleteExpense(null)}>
+        <TouchableWithoutFeedback onPress={() => { Keyboard.dismiss(); setDeleteExpense(null); }}>
           <View style={styles.deleteModalOverlay}>
-            <TouchableWithoutFeedback onPress={() => {}}>
+            <TouchableWithoutFeedback onPress={() => Keyboard.dismiss()}>
               <View style={styles.deleteModalContainer}>
                 <View style={styles.deleteModalHeader}>
                   <Text style={styles.deleteModalTitle}>Delete? 🗑️</Text>
@@ -921,7 +1012,52 @@ export default function ExpenseScreen() {
           }}
         />
       )}
-    </View>
+
+      {/* Unsaved Changes Modal */}
+      <Modal
+        visible={showUnsavedModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowUnsavedModal(false)}
+      >
+        <View style={styles.deleteModalOverlay}>
+          <View style={styles.deleteModalContent}>
+            <Text style={styles.deleteModalTitle}>📝 Unsaved Changes</Text>
+            <Text style={styles.deleteModalMessage}>
+              Do you want to save this as a draft?
+            </Text>
+            <View style={styles.deleteModalButtons}>
+              <TouchableOpacity
+                style={styles.deleteModalCancelButton}
+                onPress={() => setShowUnsavedModal(false)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.deleteModalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.deleteModalDiscardButton}
+                onPress={handleDiscardChanges}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.deleteModalDiscardText}>Discard</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.deleteModalKeepButton}
+                onPress={handleKeepDraft}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.deleteModalKeepText}>Keep Draft</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Global Custom Alert */}
+      <CustomAlert />
+
+      </View>
+    </TouchableWithoutFeedback>
   );
 }
 
@@ -940,11 +1076,36 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  headerTitle: {
-    fontSize: 18,
+  motivationalCard: {
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  motivationalCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  motivationalCardEmoji: {
+    fontSize: 20,
+    marginRight: 6,
+  },
+  motivationalCardTitle: {
+    fontSize: 14,
     fontWeight: 'bold',
+    color: colors.primary,
+  },
+  motivationalCardMessage: {
+    fontSize: 13,
     color: colors.text,
-    flex: 1,
+    lineHeight: 18,
+    textAlign: 'left',
   },
   bulkDeleteButton: {
     position: 'absolute',
@@ -1286,6 +1447,37 @@ const styles = StyleSheet.create({
   },
   deleteButtonDisabled: {
     opacity: 0.6,
+  },
+  deleteModalDiscardButton: {
+    backgroundColor: '#C62828',
+    paddingHorizontal: 15,
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  deleteModalDiscardText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  deleteModalKeepButton: {
+    backgroundColor: colors.primary,
+    paddingHorizontal: 15,
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  deleteModalKeepText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  deleteModalMessage: {
+    fontSize: 16,
+    color: colors.text,
+    textAlign: 'center',
+    marginBottom: 20,
+    lineHeight: 22,
   },
   fabShadowContainer: {
     position: 'absolute',

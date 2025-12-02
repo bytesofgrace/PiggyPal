@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { demonstrateNotification, getRandomMotivationalMessage } from '../utils/notificationService';
 import { colors } from '../utils/colors';
+import { showCustomAlert } from './CustomAlert';
 
 export default function NotificationDemo() {
   const [isLoading, setIsLoading] = useState(false);
@@ -23,14 +24,14 @@ export default function NotificationDemo() {
         '✨ This is how your reminders will look!'
       );
       
-      Alert.alert(
+      showCustomAlert(
         '🎉 Demo Sent!',
         'Check your notification! In Expo Go, notifications appear at the top of the screen.',
         [{ text: 'Got it!', style: 'default' }]
       );
     } catch (error) {
       console.error('Demo notification error:', error);
-      Alert.alert(
+      showCustomAlert(
         'Demo Error',
         'Could not send demo notification. Make sure notifications are enabled in your device settings.',
         [{ text: 'OK', style: 'default' }]
@@ -107,7 +108,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.lightGray,
   },
   demoButtonText: {
-    color: 'white',
+    color: 'black',
     fontSize: 16,
     fontWeight: '600',
   },

@@ -1,8 +1,9 @@
 // src/components/SyncStatusIndicator.js
 import { useEffect, useState } from 'react';
-import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { colors } from '../utils/colors';
 import syncService from '../utils/syncService';
+import { showCustomAlert } from './CustomAlert';
 
 const SyncStatusIndicator = () => {
   const [status, setStatus] = useState({
@@ -26,14 +27,14 @@ const SyncStatusIndicator = () => {
           if (event.isOnline) {
             // Don't show "back online" message unless there are pending operations
             if (syncService.getStatus().pendingOperations > 0) {
-              Alert.alert('📶 Back Online', 'Syncing your data...');
+              showCustomAlert('📶 Back Online', 'Syncing your data...');
             }
           }
           break;
           
         case 'sync_complete':
           if (event.failedCount > 0) {
-            Alert.alert(
+            showCustomAlert(
               '⚠️ Sync Issues', 
               `${event.failedCount} items couldn't sync. They'll be retried later.`
             );
@@ -52,9 +53,9 @@ const SyncStatusIndicator = () => {
   const handleManualSync = async () => {
     try {
       await syncService.manualSync();
-      Alert.alert('✅ Sync Complete', 'Your data is up to date');
+      showCustomAlert('✅ Sync Complete', 'Your data is up to date');
     } catch (error) {
-      Alert.alert('❌ Sync Failed', error.message);
+      showCustomAlert('❌ Sync Failed', error.message);
     }
   };
 

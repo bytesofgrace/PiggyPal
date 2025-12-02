@@ -12,6 +12,7 @@ import {
     View,
 } from 'react-native';
 import { colors } from '../utils/colors';
+import CustomAlert, { showCustomAlert } from './CustomAlert';
 
 const TimePickerModal = ({ visible, currentTime, onTimeChange, onClose }) => {
   const [hours, setHours] = useState(() => {
@@ -98,7 +99,7 @@ const TimePickerModal = ({ visible, currentTime, onTimeChange, onClose }) => {
   const handleConfirm = () => {
     // Handle empty inputs
     if (hours === '' || minutes === '') {
-      Alert.alert('⚠️ Missing Time', 'Please enter both hours and minutes');
+      showCustomAlert('⚠️ Missing Time', 'Please enter both hours and minutes');
       return;
     }
 
@@ -107,12 +108,12 @@ const TimePickerModal = ({ visible, currentTime, onTimeChange, onClose }) => {
     
     // Double-check validation (should not be needed with input handlers)
     if (isNaN(h) || h < 0 || h > 23) {
-      Alert.alert('⚠️ Invalid Hour', 'Please enter an hour between 0-23');
+      showCustomAlert('⚠️ Invalid Hour', 'Please enter an hour between 0-23');
       return;
     }
     
     if (isNaN(m) || m < 0 || m > 59) {
-      Alert.alert('⚠️ Invalid Minutes', 'Please enter minutes between 0-59');
+      showCustomAlert('⚠️ Invalid Minutes', 'Please enter minutes between 0-59');
       return;
     }
     

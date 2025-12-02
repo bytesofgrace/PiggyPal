@@ -28,6 +28,7 @@ import {
   cancelFlexibleReminder,
   scheduleFlexibleReminder
 } from '../utils/notificationService';
+import CustomAlert, { showCustomAlert } from '../components/CustomAlert';
 import notificationService from '../utils/notificationService';
 import syncService from '../utils/syncService';
 
@@ -48,6 +49,10 @@ export default function SettingsScreen({ navigation }) {
   const [showDataRetentionModal, setShowDataRetentionModal] = useState(false);
   const [showEditProfileModal, setShowEditProfileModal] = useState(false);
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
+  
+  // Custom confirmation toast for offline mode
+  const [showOfflineConfirmation, setShowOfflineConfirmation] = useState(false);
+  const [offlineConfirmationMessage, setOfflineConfirmationMessage] = useState('');
 
   
   // Profile fields
@@ -151,11 +156,11 @@ export default function SettingsScreen({ navigation }) {
       const result = await syncService.saveUserSetting(field, value);
       
       if (!result.success) {
-        Alert.alert('Settings Error', `Failed to save ${field}: ${result.error}`);
+        showCustomAlert('Settings Error', `Failed to save ${field}: ${result.error}`);
       }
     } catch (error) {
       console.error('Error updating setting:', error);
-      Alert.alert('Settings Error', 'Failed to save setting. Please try again.');
+      showCustomAlert('Settings Error', 'Failed to save setting. Please try again.');
     }
   };
 
@@ -215,17 +220,17 @@ export default function SettingsScreen({ navigation }) {
 
   const handleChangePassword = async () => {
     if (!currentPassword || !newPassword || !confirmNewPassword) {
-      Alert.alert('Error', 'Please fill in all fields');
+      showCustomAlert('Error', 'Please fill in all fields');
       return;
     }
 
     if (newPassword !== confirmNewPassword) {
-      Alert.alert('Error', 'New passwords do not match');
+      showCustomAlert('Error', 'New passwords do not match');
       return;
     }
 
     if (newPassword.length < 6) {
-      Alert.alert('Error', 'Password must be at least 6 characters');
+      showCustomAlert('Error', 'Password must be at least 6 characters');
       return;
     }
 
@@ -263,9 +268,9 @@ export default function SettingsScreen({ navigation }) {
       setConfirmNewPassword('');
       
       setShowChangePasswordModal(false);
-      Alert.alert('Success!', 'Your password has been changed! 🔒');
+      showCustomAlert('Success!', 'Your password has been changed! 🔒');
     } catch (error) {
-      Alert.alert('Error', `Failed to change password: ${error.message}`);
+      showCustomAlert('Error', `Failed to change password: ${error.message}`);
     }
   };
 
@@ -353,20 +358,35 @@ export default function SettingsScreen({ navigation }) {
     { id: 7, name: 'Saturday', short: 'Sat' }
   ];
 
+  const showOfflineToast = (message) => {
+    setOfflineConfirmationMessage(message);
+    setShowOfflineConfirmation(true);
+    // User will manually dismiss with confirmation button
+  };
+
   const toggleOfflineMode = async (value) => {
-    setOfflineMode(value);
-    const result = await syncService.setManualOfflineMode(value);
-    
-    if (result.success) {
-      Alert.alert(
-        value ? '📵 Offline Mode Enabled' : '🌐 Online Mode Enabled',
-        value 
-          ? 'Your changes will be saved locally and synced when you go back online.' 
-          : 'Your device is back online! Any pending changes will sync now.',
-        [{ text: 'OK' }]
-      );
-    } else {
-      Alert.alert('Error', 'Failed to change mode. Please try again.');
+    try {
+      console.log('🔄 Toggling offline mode to:', value);
+      setOfflineMode(value);
+      const result = await syncService.setManualOfflineMode(value);
+      console.log('🔄 Offline mode toggle result:', result);
+      
+      if (result.success) {
+        console.log('✅ About to show success confirmation...');
+        const message = value 
+          ? '📵 Offline Mode Enabled\nChanges will be saved locally and synced when you go back online.' 
+          : '🌐 Online Mode Enabled\nYour device is back online! Any pending changes will sync now.';
+        
+        showOfflineToast(message);
+        console.log('📱 Showing custom confirmation toast');
+      } else {
+        console.log('❌ Offline mode toggle failed:', result.error);
+        showOfflineToast('❌ Error\nFailed to change mode. Please try again.');
+        setOfflineMode(!value); // Revert on error
+      }
+    } catch (error) {
+      console.error('❌ Error toggling offline mode:', error);
+      showOfflineToast('❌ Error\nSomething went wrong. Please try again.');
       setOfflineMode(!value); // Revert on error
     }
   };
@@ -1293,8 +1313,28 @@ export default function SettingsScreen({ navigation }) {
         </TouchableWithoutFeedback>
       </Modal>
 
+      {/* Custom Toast for Offline Confirmation */}
+      <Modal
+        visible={showOfflineConfirmation}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowOfflineConfirmation(false)}
+      >
+        <View style={styles.toastOverlay}>
+          <View style={styles.toastContent}>
+            <Text style={styles.toastMessage}>{offlineConfirmationMessage}</Text>
+            <TouchableOpacity 
+              style={styles.confirmButton}
+              onPress={() => setShowOfflineConfirmation(false)}
+            >
+              <Text style={styles.confirmButtonText}>Got it! 👍</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
-
+      {/* Global Custom Alert */}
+      <CustomAlert />
 
     </View>
   );
@@ -1584,11 +1624,12 @@ const styles = StyleSheet.create({
   },
   // Connection status banner
   statusBanner: {
-    paddingVertical: 8,
+    paddingVertical: 10,
     paddingHorizontal: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    marginBottom: 1,
   },
   statusOnline: {
     backgroundColor: '#4CAF50',
@@ -1602,12 +1643,14 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   syncButton: {
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 8,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.5)',
+    borderColor: 'rgba(255, 255, 255, 0.4)',
+    minWidth: 80,
+    alignItems: 'center',
   },
   syncButtonText: {
     color: 'white',
@@ -1768,6 +1811,50 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
   },
   saveButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  // Toast styles
+  toastOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  toastContent: {
+    backgroundColor: 'white',
+    paddingHorizontal: 30,
+    paddingVertical: 20,
+    borderRadius: 12,
+    marginHorizontal: 40,
+    maxWidth: '80%',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  toastMessage: {
+    fontSize: 16,
+    color: colors.textDark,
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 20,
+  },
+  confirmButton: {
+    backgroundColor: colors.primary,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 25,
+    minWidth: 120,
+    alignItems: 'center',
+  },
+  confirmButtonText: {
     color: 'white',
     fontSize: 16,
     fontWeight: 'bold',
